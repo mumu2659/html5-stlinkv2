@@ -1,0 +1,2692 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ST-Link V2 · Chip ID Reader</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;500;700&display=swap');
+
+  :root {
+    --bg: #0a0c10;
+    --panel: #0e1117;
+    --border: #1e2535;
+    --accent: #00e5ff;
+    --accent2: #ff4081;
+    --green: #00ff9d;
+    --yellow: #ffd600;
+    --text: #cdd6f4;
+    --dim: #4a5568;
+    --glow: 0 0 18px rgba(0,229,255,0.35);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px 48px;
+    background-image:
+      radial-gradient(ellipse 80% 60% at 50% -10%, rgba(0,229,255,0.06) 0%, transparent 70%),
+      repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(30,37,53,0.5) 40px),
+      repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(30,37,53,0.3) 40px);
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 32px;
+    position: relative;
+  }
+
+  .logo-line {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin-bottom: 4px;
+  }
+
+  .logo-icon {
+    width: 38px; height: 38px;
+    border: 2px solid var(--accent);
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: var(--glow);
+    position: relative;
+    overflow: hidden;
+  }
+  .logo-icon::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(0,229,255,0.15), transparent);
+  }
+  .logo-icon svg { width: 22px; height: 22px; fill: var(--accent); }
+
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--accent);
+    text-shadow: var(--glow);
+  }
+
+  .subtitle {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .status-bar {
+    width: 100%;
+    max-width: 760px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.82rem;
+  }
+
+  .status-dot {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--dim);
+    transition: background 0.3s, box-shadow 0.3s;
+    flex-shrink: 0;
+  }
+  .status-dot.connected { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .status-dot.error { background: var(--accent2); box-shadow: 0 0 8px var(--accent2); }
+  .status-dot.busy { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); animation: pulse 0.8s infinite alternate; }
+
+  @keyframes pulse { from { opacity: 0.5; } to { opacity: 1; } }
+
+  #status-text { color: var(--dim); flex: 1; }
+  #status-text.ok { color: var(--green); }
+  #status-text.err { color: var(--accent2); }
+  #status-text.busy { color: var(--yellow); }
+
+  .main-grid {
+    width: 100%;
+    max-width: 760px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  @media (max-width: 560px) {
+    .main-grid { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .panel::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0.4;
+  }
+  .panel.wide { grid-column: 1 / -1; }
+
+  .panel-title {
+    font-size: 0.7rem;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .panel-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .btn {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    padding: 10px 20px;
+    transition: all 0.18s;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+    overflow: hidden;
+  }
+  .btn::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: white;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .btn:hover::after { opacity: 0.08; }
+  .btn:active::after { opacity: 0.18; }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #000;
+    width: 100%;
+    justify-content: center;
+  }
+  .btn-primary:hover { box-shadow: 0 0 20px rgba(0,229,255,0.45); }
+  .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  .btn-secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 0.8rem;
+    padding: 7px 14px;
+  }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+  .btn-danger {
+    background: transparent;
+    border: 1px solid var(--accent2);
+    color: var(--accent2);
+    font-size: 0.8rem;
+    padding: 7px 14px;
+  }
+  .btn-danger:hover { background: rgba(255,64,129,0.1); }
+
+  .row-btns {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+
+  .field-group {
+    margin-bottom: 14px;
+  }
+  .field-label {
+    font-size: 0.68rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 5px;
+  }
+  select, input[type="number"] {
+    width: 100%;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.85rem;
+    padding: 8px 10px;
+    outline: none;
+    transition: border-color 0.2s;
+    -webkit-appearance: none;
+  }
+  select:focus, input[type="number"]:focus { border-color: var(--accent); }
+
+  .chip-id-display {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1.5rem;
+    color: var(--accent);
+    text-shadow: var(--glow);
+    letter-spacing: 4px;
+    text-align: center;
+    padding: 18px 10px;
+    background: rgba(0,229,255,0.04);
+    border-radius: 6px;
+    border: 1px solid rgba(0,229,255,0.12);
+    min-height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    word-break: break-all;
+    transition: all 0.3s;
+  }
+  .chip-id-display.empty { color: var(--dim); font-size: 0.85rem; letter-spacing: 1px; text-shadow: none; }
+
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  @media (max-width: 400px) { .info-grid { grid-template-columns: 1fr; } }
+
+  .info-item {
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 8px 12px;
+  }
+  .info-key {
+    font-size: 0.6rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 3px;
+  }
+  .info-val {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.9rem;
+    color: var(--text);
+  }
+  .info-val.highlight { color: var(--green); }
+
+  .log-area {
+    background: #070910;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.78rem;
+    line-height: 1.7;
+    height: 180px;
+    overflow-y: auto;
+    color: var(--dim);
+  }
+  .log-area::-webkit-scrollbar { width: 4px; }
+  .log-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .log-line { white-space: pre-wrap; word-break: break-all; }
+  .log-line.info { color: var(--accent); }
+  .log-line.ok { color: var(--green); }
+  .log-line.warn { color: var(--yellow); }
+  .log-line.err { color: var(--accent2); }
+
+  .progress-bar-wrap {
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-top: 10px;
+    overflow: hidden;
+    display: none;
+  }
+  .progress-bar-wrap.show { display: block; }
+  .progress-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.3s;
+    box-shadow: 0 0 8px var(--accent);
+  }
+  .progress-bar.indeterminate {
+    width: 40%;
+    animation: slide 1.2s infinite ease-in-out;
+  }
+  @keyframes slide {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(300%); }
+  }
+
+  .uid-bytes {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-top: 8px;
+  }
+  .uid-byte {
+    background: rgba(0,229,255,0.08);
+    border: 1px solid rgba(0,229,255,0.2);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.82rem;
+    color: var(--accent);
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity 0.25s, transform 0.25s;
+  }
+  .uid-byte.show { opacity: 1; transform: none; }
+
+  .connect-hint {
+    font-size: 0.75rem;
+    color: var(--dim);
+    text-align: center;
+    margin-top: 8px;
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  /* ── 冲突错误弹窗 ── */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+    padding: 16px;
+  }
+  .modal-overlay.show {
+    opacity: 1;
+    pointer-events: all;
+  }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--accent2);
+    border-radius: 12px;
+    padding: 28px 28px 22px;
+    max-width: 500px;
+    width: 100%;
+    position: relative;
+    box-shadow: 0 0 40px rgba(255,64,129,0.2);
+    transform: translateY(12px);
+    transition: transform 0.2s;
+  }
+  .modal-overlay.show .modal {
+    transform: translateY(0);
+  }
+  .modal-icon {
+    font-size: 2rem;
+    margin-bottom: 10px;
+  }
+  .modal-title {
+    font-size: 1.2rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent2);
+    margin-bottom: 10px;
+  }
+  .modal-desc {
+    font-size: 0.9rem;
+    color: var(--text);
+    line-height: 1.6;
+    margin-bottom: 18px;
+  }
+  .modal-cmd {
+    background: #070910;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent2);
+    border-radius: 6px;
+    padding: 12px 16px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--yellow);
+    margin-bottom: 18px;
+    position: relative;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .modal-cmd:hover { border-left-color: var(--yellow); }
+  .modal-cmd-copy {
+    position: absolute;
+    top: 8px; right: 10px;
+    font-size: 0.65rem;
+    letter-spacing: 1px;
+    color: var(--dim);
+    font-family: 'Rajdhani', sans-serif;
+    text-transform: uppercase;
+  }
+  .modal-steps {
+    font-size: 0.82rem;
+    color: var(--dim);
+    font-family: 'Share Tech Mono', monospace;
+    line-height: 2;
+    margin-bottom: 20px;
+  }
+  .modal-steps span { color: var(--text); }
+  .modal-footer {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+  }
+
+  .not-supported-warning {
+    background: rgba(255,64,129,0.07);
+    border: 1px solid rgba(255,64,129,0.25);
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: 0.85rem;
+    color: var(--accent2);
+    margin-bottom: 16px;
+    display: none;
+    max-width: 760px;
+    width: 100%;
+    font-family: 'Share Tech Mono', monospace;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-line">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+      </svg>
+    </div>
+    <h1>ST-Link V2</h1>
+  </div>
+  <div class="subtitle">Chip ID Reader · WebUSB Interface</div>
+</header>
+
+<!-- 设备占用 / 无法访问 错误弹窗 -->
+<div class="modal-overlay" id="modal-conflict">
+  <div class="modal">
+    <div class="modal-icon">🔌</div>
+    <div class="modal-title">无法访问 ST-Link</div>
+    <div class="modal-desc" id="modal-desc-text">
+      WebUSB 无法获得设备访问权限。在 macOS 上，<code style="background:rgba(255,255,255,0.07);padding:1px 5px;border-radius:3px;font-size:0.85em">libusb</code>（st-info / st-flash 等工具）与 Chrome WebUSB 会互相争抢 USB Interface，即使进程已退出，内核有时仍持有句柄。
+      <br><br><strong style="color:var(--yellow)">最可靠的解法：先清理进程，再物理拔插 ST-Link USB。</strong>
+    </div>
+
+    <div style="font-size:0.68rem;letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin-bottom:8px">Step 1 · 终端执行</div>
+    <div class="modal-cmd" onclick="copyKillCmd(this)" title="点击复制">
+      pkill -f "ST-LINK_gdbserver"; pkill -f "STLinkUSBDriver"; pkill -f "st-util"
+      <span class="modal-cmd-copy" id="copy-hint">点击复制</span>
+    </div>
+
+    <div style="font-size:0.68rem;letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin:14px 0 8px">Step 2 · 拔插 USB</div>
+    <div style="display:flex;align-items:center;gap:16px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:18px">
+      <div style="font-size:2rem;line-height:1">🔌</div>
+      <div style="font-family:'Share Tech Mono',monospace;font-size:0.8rem;line-height:1.8;color:var(--text)">
+        将 ST-Link 的 <span style="color:var(--accent)">USB 线从 Mac 上拔出</span><br>
+        等待 <span style="color:var(--yellow)">2 秒</span>，再重新插入<br>
+        <span style="color:var(--dim)">听到系统连接音后再操作</span>
+      </div>
+    </div>
+
+    <div style="font-size:0.68rem;letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin-bottom:8px">Step 3 · 重新连接</div>
+    <div style="font-family:'Share Tech Mono',monospace;font-size:0.8rem;color:var(--dim);margin-bottom:20px;line-height:1.8">
+      拔插完成后，立即点击下方"重新连接"按钮。<br>
+      <span style="color:var(--accent2)">注意：拔插后不要再运行 st-info / st-flash 命令。</span>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+      <button class="btn btn-primary" style="width:auto" onclick="closeModal(); triggerReconnect()">
+        ↺ &nbsp;重新连接
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="not-supported-warning" id="not-supported">
+  ⚠ 当前浏览器不支持 WebUSB API。请使用 Chrome 或 Edge（桌面版）打开此页面。
+</div>
+
+<!-- 连接前预检提示 -->
+<div id="precaution-bar" style="
+  width:100%; max-width:760px;
+  background: rgba(255,214,0,0.06);
+  border: 1px solid rgba(255,214,0,0.25);
+  border-radius:8px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  font-family:'Share Tech Mono',monospace;
+  font-size:0.78rem;
+  color:var(--yellow);
+  line-height:1.7;
+">
+  <span style="font-size:1rem;margin-top:1px;flex-shrink:0">💡</span>
+  <span>
+    连接前请确认：已关闭 STM32CubeIDE / CubeProgrammer，且未在终端运行 <code style="background:rgba(255,255,255,0.07);padding:0 4px;border-radius:3px">st-info</code> / <code style="background:rgba(255,255,255,0.07);padding:0 4px;border-radius:3px">st-flash</code> 等命令。
+    若连接失败，请<strong style="color:var(--text)">物理拔插 USB 后重试</strong>。
+    <span id="precaution-dismiss" onclick="document.getElementById('precaution-bar').style.display='none'" style="cursor:pointer;color:var(--dim);margin-left:8px;text-decoration:underline">知道了，不再显示</span>
+  </span>
+</div>
+
+<div class="status-bar">
+  <div class="status-dot" id="status-dot"></div>
+  <span id="status-text">未连接 ST-Link 设备</span>
+  <button class="btn btn-secondary" id="btn-connect" style="margin-left:auto; flex-shrink:0">连接设备</button>
+  <button class="btn btn-danger" id="btn-disconnect" style="display:none; flex-shrink:0">断开</button>
+</div>
+
+<div class="main-grid">
+  <!-- 配置 -->
+  <div class="panel">
+    <div class="panel-title">连接配置</div>
+    <div class="field-group">
+      <div class="field-label">目标接口</div>
+      <select id="sel-interface">
+        <option value="swd">SWD (Serial Wire Debug)</option>
+        <option value="jtag">JTAG</option>
+      </select>
+    </div>
+    <div class="field-group">
+      <div class="field-label">SWD 频率 (kHz)</div>
+      <select id="sel-freq">
+        <option value="4000">4000</option>
+        <option value="1800" selected>1800</option>
+        <option value="900">900</option>
+        <option value="400">400</option>
+        <option value="125">125</option>
+      </select>
+    </div>
+    <div class="field-group">
+      <div class="field-label">目标电压</div>
+      <select id="sel-voltage">
+        <option value="3.3">3.3V</option>
+        <option value="1.8">1.8V</option>
+        <option value="auto" selected>Auto Detect</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" id="btn-read" disabled>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      读取 Chip ID
+    </button>
+    <div class="progress-bar-wrap" id="progress-wrap">
+      <div class="progress-bar indeterminate" id="progress-bar"></div>
+    </div>
+  </div>
+
+  <!-- Chip ID 显示 -->
+  <div class="panel">
+    <div class="panel-title">Chip ID (UID)</div>
+    <div class="chip-id-display empty" id="chip-id-display">-- 等待读取 --</div>
+    <div class="uid-bytes" id="uid-bytes"></div>
+    <div class="row-btns">
+      <button class="btn btn-secondary" id="btn-copy" disabled>复制</button>
+      <button class="btn btn-secondary" id="btn-clear">清除</button>
+    </div>
+    <div class="connect-hint" id="chip-hint" style="margin-top:12px">连接设备后点击"读取 Chip ID"</div>
+  </div>
+
+  <!-- 芯片信息 -->
+  <div class="panel wide" id="panel-info">
+    <div class="panel-title">芯片信息</div>
+    <div class="info-grid" id="info-grid">
+      <div class="info-item"><div class="info-key">型号</div><div class="info-val" id="info-model">—</div></div>
+      <div class="info-item"><div class="info-key">内核</div><div class="info-val" id="info-core">—</div></div>
+      <div class="info-item"><div class="info-key">Flash 大小</div><div class="info-val" id="info-flash">—</div></div>
+      <div class="info-item"><div class="info-key">SRAM 大小</div><div class="info-val" id="info-sram">—</div></div>
+      <div class="info-item"><div class="info-key">IDCODE</div><div class="info-val highlight" id="info-idcode">—</div></div>
+      <div class="info-item"><div class="info-key">Revision</div><div class="info-val" id="info-rev">—</div></div>
+      <div class="info-item"><div class="info-key">目标电压</div><div class="info-val highlight" id="info-vdd">—</div></div>
+      <div class="info-item"><div class="info-key">ST-Link 版本</div><div class="info-val" id="info-stlink">—</div></div>
+    </div>
+  </div>
+
+  <!-- 固件编程 -->
+  <div class="panel wide" id="panel-program">
+    <div class="panel-title">固件编程</div>
+    <div class="field-group">
+      <div class="field-label">固件文件</div>
+      <div style="display:flex; gap:8px; align-items:center">
+        <input type="file" id="file-input" accept=".hex,.bin" style="flex:1; padding:8px; background:var(--panel); border:1px solid var(--border); border-radius:4px; color:var(--text); font-family:monospace; font-size:0.85rem">
+        <span id="file-info" style="color:var(--dim); font-size:0.8rem; min-width:120px">未选择</span>
+      </div>
+    </div>
+    
+    <div class="field-group">
+      <div class="field-label">固件信息</div>
+      <div style="background:var(--panel); padding:10px; border-radius:4px; border-left:3px solid var(--accent); font-family:monospace; font-size:0.8rem; color:var(--dim)">
+        <div id="file-stats" style="min-height:60px">-- 未加载固件 --</div>
+      </div>
+    </div>
+    
+    <div class="field-group">
+      <div class="field-label">编程选项</div>
+      <label style="display:flex; align-items:center; gap:8px; margin-bottom:8px; cursor:pointer">
+        <input type="checkbox" id="opt-verify" checked style="width:16px; height:16px; cursor:pointer">
+        <span>编程后验证</span>
+      </label>
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer">
+        <input type="checkbox" id="opt-erase-all" style="width:16px; height:16px; cursor:pointer">
+        <span>编程前全片擦除（不推荐，较慢）</span>
+      </label>
+    </div>
+    
+    <div class="field-group">
+      <button class="btn btn-primary" id="btn-program" disabled style="width:100%">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 19.5c-1 0-1.5.5-2 1m4-10v10m4-10v10m-8-14h8a2 2 0 0 1 2 2v2H6v-2a2 2 0 0 1 2-2z"/></svg>
+        开始编程
+      </button>
+    </div>
+    
+    <div class="progress-section" id="progress-program" style="display:none; margin-top:16px">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
+        <span id="progress-step">准备中...</span>
+        <span id="progress-percent">0%</span>
+      </div>
+      <div class="progress-bar-wrap" style="background:var(--border); border-radius:6px; height:6px; overflow:hidden">
+        <div class="progress-bar" id="progress-bar-program" style="width:0%; transition:width 0.2s; height:100%; background:var(--accent)"></div>
+      </div>
+      <div id="progress-detail" style="font-size:0.75rem; color:var(--dim); margin-top:6px; font-family:monospace">0 / 0 bytes</div>
+    </div>
+  </div>
+
+  <!-- 日志 -->
+  <div class="panel wide">
+    <div class="panel-title">操作日志</div>
+    <div class="log-area" id="log"></div>
+    <div class="row-btns">
+      <button class="btn btn-secondary" id="btn-clear-log">清除日志</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────
+// ST-Link V2 WebUSB 驱动
+// ─────────────────────────────────────────
+const STLINK_VID = 0x0483;
+const STLINK_PID_V2 = 0x3748;
+const STLINK_PID_V21 = 0x374B;
+
+// ST-Link V2 命令（使用 APIv2）
+const CMD = {
+  GET_VERSION:         0xF1,
+  DEBUG_COMMAND:       0xF2,
+  DFU_COMMAND:         0xF3,
+  GET_CURRENT_MODE:    0xF5,
+  GET_TARGET_VOLTAGE:  0xF7,
+  GET_VERSION_EX:      0xFB,
+};
+const DEBUG_CMD = {
+  ENTER:               0x30,  // v2: APIV2_ENTER
+  EXIT:                0x21,
+  READ_COREID:         0x22,
+  READREG:             0x33,  // v2: APIV2_READREG
+  WRITEREG:            0x34,  // v2: APIV2_WRITEREG
+  READMEM_32BIT:       0x07,
+  WRITEMEM_32BIT:      0x08,
+  WRITEMEM_8BIT:       0x0D,  // 8-bit memory write
+  RUNCORE:             0x09,
+  HALTCORE:            0x02,
+  GETSTATUS:           0x01,  // Get core status
+  RESETCORE:           0x03,
+  GET_LAST_RW_STATUS:  0x3B,
+  SWD_SET_FREQ:        0x43,  // APIv2 频率设置
+  READDEBUGREG:        0x36,  // APIv2 读 debug reg
+  WRITEDEBUGREG:       0x35,  // APIv2 写 debug reg
+};
+const DEBUG_MODE = {
+  SWD: 0xA3,
+  JTAG: 0x00,
+};
+const STLINK_STATUS_OK = 0x80;
+const STLINK_MODE = {
+  DFU:   0x00,
+  DEBUG: 0x02,
+};
+
+// STM32 UID 基地址（大多数 STM32）
+const STM32_UID_BASE = 0x1FFF7A10;  // F4 系列
+const STM32_UID_F1   = 0x1FFFF7E8;  // F1 系列
+const STM32_UID_L0   = 0x1FF80050;  // L0 系列
+const STM32_UID_G0   = 0x1FFF7590;  // G0 系列
+
+// IDCODE 寄存器
+const ARM_IDCODE_ADDR = 0xE0042000;
+
+// SWD 频率映射（APIv2）
+const SWD_FREQ_MAP = [
+  [4000000, 0],
+  [1800000, 1],  // 默认
+  [1200000, 2],
+  [950000, 3],
+  [480000, 4],
+  [240000, 5],
+  [125000, 6],
+];
+
+class STLinkUSB {
+  constructor() {
+    this.device = null;
+    this.epIn = null;
+    this.epOut = null;
+    this.armLoaded = false;  // ARM Flash 程序是否已加载到 SRAM
+  }
+
+  async connect() {
+    const filters = [
+      { vendorId: STLINK_VID, productId: STLINK_PID_V2 },
+      { vendorId: STLINK_VID, productId: STLINK_PID_V21 },
+    ];
+    this.device = await navigator.usb.requestDevice({ filters });
+    await this.device.open();
+    if (this.device.configuration === null)
+      await this.device.selectConfiguration(1);
+    await this.device.claimInterface(0);
+
+    // 找到端点
+    const iface = this.device.configuration.interfaces[0].alternate;
+    for (const ep of iface.endpoints) {
+      if (ep.direction === 'in')  this.epIn  = ep.endpointNumber;
+      if (ep.direction === 'out') this.epOut = ep.endpointNumber;
+    }
+    return this.device.productName || 'ST-Link V2';
+  }
+
+  async disconnect() {
+    if (!this.device) return;
+    const dev = this.device;
+    this.device = null;
+    this.epIn = null;
+    this.epOut = null;
+    try {
+      await dev.releaseInterface(0);
+      await dev.close();
+    } catch(e) {}
+  }
+
+  async xfer(cmdBytes, rxLen = 8, timeoutMs = 5000, isOptional = false, quiet = false) {
+    if (!this.device) {
+      if (isOptional) return new Uint8Array(64);
+      throw new Error('USB 设备未连接');
+    }
+    if (this.epIn == null || this.epOut == null) {
+      if (isOptional) return new Uint8Array(64);
+      throw new Error('USB 端点未就绪');
+    }
+    const buf = new Uint8Array(31);
+    buf.set(cmdBytes);
+
+    // 发送命令，如果 stall 则 clearHalt 后重试一次
+    let outResult;
+    try {
+      outResult = await Promise.race([
+        this.device.transferOut(this.epOut, buf),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('transferOut 超时')), timeoutMs))
+      ]);
+    } catch(e) {
+      throw new Error(`transferOut 失败: ${e.message}`);
+    }
+
+    if (outResult.status === 'stall') {
+      // 自动 clearHalt 并重试
+      await this.device.clearHalt('out', this.epOut);
+      await this.device.clearHalt('in',  this.epIn);
+      outResult = await Promise.race([
+        this.device.transferOut(this.epOut, buf),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('transferOut 重试超时')), timeoutMs))
+      ]);
+      if (outResult.status !== 'ok') {
+        throw new Error(`transferOut 重试仍失败: status=${outResult.status}`);
+      }
+    } else if (outResult.status !== 'ok') {
+      throw new Error(`transferOut 失败: status=${outResult.status}`);
+    }
+
+    // 关键修复：如果请求超过 4 字节，可能需要读多次（APIv2 单次可能只返回 4 字节）
+    // 或者新的数据在新的包中，需要清理旧数据
+    let result = null;
+    let attempts = 0;
+    
+    while (result === null && attempts < 3) {
+      attempts++;
+      try {
+        const r = await Promise.race([
+          this.device.transferIn(this.epIn, 64),
+          new Promise((_, rej) => setTimeout(() => rej(new Error(`transferIn 超时 (${timeoutMs}ms)`)), timeoutMs))
+        ]);
+        
+        if (!r.data || r.data.byteLength === 0) {
+          console.warn(`xfer: 收到空包 (ZLP)，等待重试...`);
+          await new Promise(res => setTimeout(res, 10));
+          continue;
+        }
+        
+          result = new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength);
+      } catch(e) {
+        if (attempts < 3 && !isOptional) {
+          if (!quiet) {
+            console.warn(`xfer: 读取失败 (${e.message})，清理后重试...`);
+          }
+          try {
+            await this.device.clearHalt('in', this.epIn);
+          } catch(_) {}
+          await new Promise(res => setTimeout(res, 10));
+        } else {
+          if (isOptional) {
+            if (!quiet) {
+              console.log(`xfer: 可选操作失败 (${e.message})，继续...`);
+            }
+            return new Uint8Array(64);
+          }
+          throw e;
+        }
+      }
+    }
+
+    if (!result) {
+      throw new Error('无法读取响应数据');
+    }
+
+    // 诊断：打印前 16 字节
+    if (cmdBytes[0] === CMD.DEBUG_COMMAND && (cmdBytes[1] === DEBUG_CMD.READREG || cmdBytes[1] === DEBUG_CMD.READMEM_32BIT || cmdBytes[1] === DEBUG_CMD.READ_COREID)) {
+      console.log(`xfer(${['READREG','READMEM_32BIT','READ_COREID'][cmdBytes[1]===0x33?0:cmdBytes[1]===0x07?1:2]}) → raw=[${Array.from(result.slice(0,8)).map(x=>x.toString(16).padStart(2,'0')).join(' ')}]`);
+    }
+    return result;
+  }
+
+  async getVersion() {
+    const r = await this.xfer([CMD.GET_VERSION], 8);
+    // Byte 0-1: version word, Byte 2-3: VID, Byte 4-5: PID
+    const ver = (r[0] << 8) | r[1];
+    const stlink_v = (ver >> 12) & 0xF;
+    const jtag_v   = (ver >> 6)  & 0x3F;
+    const swim_v   =  ver        & 0x3F;
+    // sanity check
+    if (stlink_v === 0 && jtag_v === 0) {
+      throw new Error(`固件版本读取异常 raw=[${Array.from(r.slice(0,4)).map(x=>x.toString(16).padStart(2,'0')).join(' ')}]`);
+    }
+    return `V${stlink_v}J${jtag_v}S${swim_v}`;
+  }
+
+  async getTargetVoltage() {
+    const r = await this.xfer([CMD.GET_TARGET_VOLTAGE], 8);
+    const factor  = ((r[3] << 24) | (r[2] << 16) | (r[1] << 8) | r[0]);
+    const reading = ((r[7] << 24) | (r[6] << 16) | (r[5] << 8) | r[4]);
+    if (factor === 0) return 0;
+    return (2 * reading * 1.2 / factor).toFixed(2);
+  }
+
+  async enterDebugSWD() {
+    if (!this.device) {
+      throw new Error('USB 设备未连接');
+    }
+    // 在发送命令前清理端点（可能前一个操作留下了数据）
+    try {
+      await this.device.clearHalt('in',  this.epIn);
+      await this.device.clearHalt('out', this.epOut);
+      console.log('enterDebugSWD: 端点已清理');
+    } catch(e) {
+      console.warn(`enterDebugSWD: clearHalt 异常（继续）: ${e.message}`);
+    }
+    
+    // 等待 200ms 让设备恢复
+    await new Promise(r => setTimeout(r, 200));
+    
+    const cmd = [CMD.DEBUG_COMMAND, DEBUG_CMD.ENTER, DEBUG_MODE.SWD];
+    console.log(`enterDebugSWD: 发送命令 [${Array.from(cmd).map(x=>x.toString(16)).join(',')}]`);
+    const r = await this.xfer(cmd, 2);
+    console.log(`enterDebugSWD: 收到响应 [${Array.from(r.slice(0,2)).map(x=>x.toString(16).padStart(2,'0')).join(' ')}]`);
+    const ok = r[0] === STLINK_STATUS_OK || r[0] === 0x00;
+    if (!ok) throw new Error(`进入SWD失败 status=0x${r[0].toString(16)}`);
+    return ok;
+  }
+
+  async setSWDFreq(freqHz = 4000000) {
+    // APIv2 SWD_SET_FREQ 命令使用除数表
+    for (const [targetFreq, divisor] of SWD_FREQ_MAP) {
+      if (freqHz >= targetFreq) {
+        const cmd = [CMD.DEBUG_COMMAND, DEBUG_CMD.SWD_SET_FREQ, divisor];
+        const r = await this.xfer(cmd, 2);
+        if (r[0] !== STLINK_STATUS_OK) {
+          console.warn(`setSWDFreq: 频率设置返回非 OK (0x${r[0].toString(16)})`);
+        } else {
+          console.log(`setSWDFreq: 成功设置为 ${targetFreq / 1000000}MHz (divisor=${divisor})`);
+        }
+        return r[0] === STLINK_STATUS_OK;
+      }
+    }
+    throw new Error(`设定频率 ${freqHz / 1000000}MHz 过低`);
+  }
+
+  async exitDebug() {
+    if (!this.device) {
+      return false;
+    }
+    const mode = await this.getCurrentMode();
+    if (mode !== STLINK_MODE.DEBUG) {
+      return false;
+    }
+
+    // 使用较短的超时（1秒）确保快速失败
+    try {
+      await Promise.race([
+        this.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.EXIT], 2, 1000, true, true),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('exitDebug 超时')), 1200))
+      ]);
+      console.log('✓ 调试已退出');
+      return true;
+    } catch(e) {
+      console.log(`ℹ️ exitDebug 未响应: ${e.message}`);
+      return false;
+    }
+  }
+
+  async getCurrentMode() {
+    if (!this.device) return null;
+    try {
+      const r = await this.xfer([CMD.GET_CURRENT_MODE], 2, 500, true, true);
+      if (!r || r.length === 0) return null;
+      return r[0] & 0xFF;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async leaveState() {
+    if (!this.device) {
+      return;
+    }
+    const mode = await this.getCurrentMode();
+
+    if (mode === STLINK_MODE.DEBUG) {
+      try {
+        await this.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.EXIT], 2, 1200, true, true);
+      } catch (_) {}
+    }
+
+    const modeAfterDebug = await this.getCurrentMode();
+    if (modeAfterDebug === STLINK_MODE.DFU) {
+      try {
+        await this.xfer([CMD.DFU_COMMAND, 0x07], 2, 800, true, true);
+      } catch (_) {}
+    }
+
+    try { await this.device.clearHalt('in', this.epIn); } catch (_) {}
+    try { await this.device.clearHalt('out', this.epOut); } catch (_) {}
+  }
+
+  async readMem32(addr) {
+    const cmd = [
+      CMD.DEBUG_COMMAND, DEBUG_CMD.READMEM_32BIT,
+      addr & 0xFF, (addr >> 8) & 0xFF, (addr >> 16) & 0xFF, (addr >> 24) & 0xFF,
+      4, 0
+    ];
+    
+    const r = await Promise.race([
+      this.xfer(cmd, 8),
+      new Promise((_, rej) => setTimeout(() => rej(new Error(`readMem32 timeout`)), 6000))
+    ]);
+    
+    const val = ((r[3] & 0xFF) << 24) | ((r[2] & 0xFF) << 16) | ((r[1] & 0xFF) << 8) | (r[0] & 0xFF);
+    return val;
+  }
+
+  async readDebugReg32(addr) {
+    // 使用 APIV2 READDEBUGREG 读取调试/外设寄存器
+    const cmd = [
+      CMD.DEBUG_COMMAND, DEBUG_CMD.READDEBUGREG,
+      addr & 0xFF, (addr >> 8) & 0xFF, (addr >> 16) & 0xFF, (addr >> 24) & 0xFF
+    ];
+
+    const r = await this.xfer(cmd, 8, 800);
+    // APIV2 返回: [status0 status1 value0 value1 value2 value3 ...] 或直接含 value
+    // 兼容两种返回格式，优先取后4字节
+    let base = 0;
+    if (r.length >= 8) {
+      base = 4;
+    }
+    const val = ((r[base + 3] & 0xFF) << 24) | ((r[base + 2] & 0xFF) << 16) | ((r[base + 1] & 0xFF) << 8) | (r[base + 0] & 0xFF);
+    return val >>> 0;
+  }
+
+  async getJtagId() {
+    // 根据 JTAG ID 寄存器判断 STM32 vs GD32
+    // 并行读取三个地址以大幅减少总耗时
+    // 返回 0x041 → STM32
+    // 返回 0x7A3 → GD32
+    try {
+      // 并行读取：三个地址同时发送 → 省时约 66% （3个顺序 vs 1个并行）
+      // 添加 10 秒总超时防止卡住
+      const [val_E00FFFD0, val_E00FFFE4, val_E00FFFE8] = await Promise.race([
+        Promise.all([
+          this.readMem32(0xE00FFFD0),
+          this.readMem32(0xE00FFFE4),
+          this.readMem32(0xE00FFFE8)
+        ]),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('JTAG ID 读取总超时')), 10000))
+      ]);
+      
+      console.log(`JTAG ID 诊断 (并行读取):`);
+      console.log(`  0xE00FFFD0 = 0x${val_E00FFFD0.toString(16).padStart(8,'0')}`);
+      console.log(`  0xE00FFFE4 = 0x${val_E00FFFE4.toString(16).padStart(8,'0')}`);
+      console.log(`  0xE00FFFE8 = 0x${val_E00FFFE8.toString(16).padStart(8,'0')}`);
+      
+      // 低字节提取
+      const byte_D0 = val_E00FFFD0 & 0xFF;
+      const byte_E4 = val_E00FFFE4 & 0xFF;
+      const byte_E8 = val_E00FFFE8 & 0xFF;
+      
+      // 按照参考代码的逻辑计算
+      if (byte_E8 & 0x08) {
+        const jtagId = (((byte_D0 & 0x0F) << 8) | 
+                        ((byte_E4 & 0xFF) >> 3) | 
+                        ((byte_E8 & 0x07) << 5)) + 1;
+        console.log(`✓ JTAG ID = 0x${jtagId.toString(16).padStart(3,'0')}`);
+        return jtagId;
+      }
+      
+      console.log(`⚠️ JTAG ID 计算条件不满足 (byte[E8]&0x08=0)`);
+      return 0;
+    } catch(e) {
+      console.log(`⚠️ JTAG ID 读取失败: ${e.message}`);
+      return -1;
+    }
+  }
+
+  async readCoreID() {
+    const r = await this.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.READ_COREID], 4);
+    // 小端格式，直接从前 4 字节提取
+    const val = ((r[3] & 0xFF) << 24) | ((r[2] & 0xFF) << 16) | ((r[1] & 0xFF) << 8) | (r[0] & 0xFF);
+    console.log(`readCoreID: raw=[${Array.from(r.slice(0,4)).map(x=>x.toString(16).padStart(2,'0')).join(' ')}] = 0x${val.toString(16)}`);
+    return val;
+  }
+
+  async readUID(base) {
+    const w0 = await this.readMem32(base);
+    const w1 = await this.readMem32(base + 4);
+    const w2 = await this.readMem32(base + 8);
+    return [w0, w1, w2];
+  }
+
+  async writeMem8(addr, data) {
+    // 写入 8 位数据块（用于加载 ARM 程序到 SRAM）
+    if (!data || data.length === 0) return true;
+    
+    // 参考 webstlink/pystlink：WRITEMEM_8BIT 单次建议不超过 64 字节
+    const chunk_size = 64;
+    
+    for (let offset = 0; offset < data.length; offset += chunk_size) {
+      const chunk = data.slice(offset, Math.min(offset + chunk_size, data.length));
+      const cmd = new Uint8Array([
+        CMD.DEBUG_COMMAND, DEBUG_CMD.WRITEMEM_8BIT,
+        (addr + offset) & 0xFF, 
+        ((addr + offset) >> 8) & 0xFF, 
+        ((addr + offset) >> 16) & 0xFF, 
+        ((addr + offset) >> 24) & 0xFF,
+        chunk.length & 0xFF, (chunk.length >> 8) & 0xFF,
+        0, 0, 0, 0, 0, 0, 0, 0
+      ]);
+
+      const getRwStatusCmd = new Uint8Array([
+        CMD.DEBUG_COMMAND, DEBUG_CMD.GET_LAST_RW_STATUS,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+      ]);
+      
+      try {
+        let outResult = await this.device.transferOut(this.epOut, cmd);
+        if (outResult.status !== 'ok') throw new Error(`WriteMem8 Cmd transferOut failed: ${outResult.status}`);
+
+        outResult = await this.device.transferOut(this.epOut, chunk);
+        if (outResult.status !== 'ok') throw new Error(`WriteMem8 Payload transferOut failed: ${outResult.status}`);
+
+        outResult = await this.device.transferOut(this.epOut, getRwStatusCmd);
+        if (outResult.status !== 'ok') throw new Error(`WriteMem8 GetStatus transferOut failed: ${outResult.status}`);
+
+        const r = await Promise.race([
+          this.device.transferIn(this.epIn, 2),
+          new Promise((_, rej) => setTimeout(() => rej(new Error(`writeMem8(0x${(addr + offset).toString(16)}): transferIn 超时`)), 500))
+        ]);
+
+        if (!r.data || r.data.byteLength === 0) {
+          throw new Error(`writeMem8(0x${(addr + offset).toString(16)}): 未收到状态响应`);
+        }
+
+        const statusData = new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength);
+        const ok = statusData[0] === STLINK_STATUS_OK || statusData[0] === 0x80;
+        if (!ok) {
+          console.warn(`writeMem8(0x${(addr + offset).toString(16)}): ERR 0x${statusData[0].toString(16).padStart(2,'0')}`);
+          return false;
+        }
+      } catch (e) {
+        console.error(`writeMem8(0x${(addr + offset).toString(16)}): ${e.message}`);
+        throw e;
+      }
+    }
+    return true;
+  }
+
+  async setReg(regNum, value) {
+    // 设置 ARM 寄存器 (R0-R15)
+    // 用于向 ARM 程序传参
+    const cmd = [
+      CMD.DEBUG_COMMAND, DEBUG_CMD.WRITEREG,
+      regNum & 0xFF
+    ];
+    
+    // 追加 32 位值 (小端格式)
+    cmd.push(value & 0xFF);
+    cmd.push((value >> 8) & 0xFF);
+    cmd.push((value >> 16) & 0xFF);
+    cmd.push((value >> 24) & 0xFF);
+    
+    try {
+      const r = await this.xfer(cmd, 2, 2000);
+      const ok = r[0] === STLINK_STATUS_OK || r[0] === 0x80;
+      
+      if (!ok) {
+        console.warn(`setReg(R${regNum}=0x${value.toString(16).padStart(8,'0')}): 返回异常状态 0x${r[0].toString(16).padStart(2,'0')}`);
+        return false;
+      }
+      
+      console.log(`setReg(R${regNum}=0x${value.toString(16).padStart(8,'0')}): ✓`);
+      return ok;
+    } catch (e) {
+      console.error(`setReg(R${regNum}): ${e.message}`);
+      throw e;
+    }
+  }
+
+  async core_run() {
+    // 运行 ARM 内核程序
+    const cmd = [CMD.DEBUG_COMMAND, DEBUG_CMD.RUNCORE];
+    
+    try {
+      const r = await this.xfer(cmd, 2, 5000);
+      return r[0] === STLINK_STATUS_OK || r[0] === 0x80;
+    } catch (e) {
+      console.error(`core_run(): ${e.message}`);
+      throw e;
+    }
+  }
+
+  async coreResetHalt() {
+    // 对齐 webstlink/pystlink：复位并立即保持 halt，避免 watchdog/固件继续运行
+    const DEMCR = 0xE000EDFC;
+    const AIRCR = 0xE000ED0C;
+    const DEMCR_HALT_AFTER_RESET = 0x00000001;
+    const AIRCR_SYSRESETREQ = 0x05FA0004;
+
+    await this.writeDebugReg32(DEMCR, DEMCR_HALT_AFTER_RESET);
+    await this.writeDebugReg32(AIRCR, AIRCR_SYSRESETREQ);
+    await new Promise(r => setTimeout(r, 80));
+    return this.haltCoreAndCheck(1200);
+  }
+
+  async haltCoreAndCheck(maxWaitMs = 800) {
+    // 强制暂停内核并验证 S_HALT，避免目标仍在运行导致 Flash KEY 写入无效
+    const DHCSR = 0xE000EDF0;
+    const DHCSR_HALT_REQ = 0xA05F0003; // DBGKEY | C_DEBUGEN | C_HALT
+
+    try {
+      // 方式1：ST-Link HALT 命令
+      await this.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.HALTCORE], 2, 800);
+    } catch (_) {}
+
+    // 方式2：直接写 DHCSR，提升兼容性
+    await this.writeDebugReg32(DHCSR, DHCSR_HALT_REQ).catch(() => false);
+
+    const start = Date.now();
+    while ((Date.now() - start) < maxWaitMs) {
+      try {
+        const dhcsr = await this.readMem32(DHCSR);
+        if ((dhcsr & 0x00020000) !== 0) { // S_HALT
+          console.log(`haltCoreAndCheck: ✓ halted (DHCSR=0x${dhcsr.toString(16)})`);
+          return true;
+        }
+      } catch (_) {}
+      await new Promise(r => setTimeout(r, 20));
+    }
+
+    console.warn('haltCoreAndCheck: 未检测到 S_HALT');
+    return false;
+  }
+
+  async waitForBreakpoint(maxWaitMs = 5000) {
+    // 等待 ARM 程序在断点处停下（轮询 DHCSR.S_HALT 更可靠）
+    const DHCSR = 0xE000EDF0;
+    const startTime = Date.now();
+    const pollInterval = 50;
+    
+    while (Date.now() - startTime < maxWaitMs) {
+      try {
+        const dhcsr = await this.readDebugReg32(DHCSR);
+        if ((dhcsr & 0x00080000) !== 0) {
+          throw new Error(`Flash algorithm crashed (DHCSR=0x${dhcsr.toString(16)})`);
+        }
+        if ((dhcsr & 0x00020000) !== 0) {
+          return true;  // S_HALT
+        }
+        
+        await new Promise(r => setTimeout(r, pollInterval));
+        
+      } catch (e) {
+        await new Promise(r => setTimeout(r, pollInterval));
+      }
+    }
+    
+    console.warn(`waitForBreakpoint 超时 (> ${maxWaitMs}ms)`);
+    return false;
+  }
+
+  async writeMem32(addr, value) {
+    // 写入 32 位数据
+    // 正确时序：命令 OUT -> 数据 OUT -> GET_LAST_RW_STATUS 命令 OUT -> 状态 IN
+
+    // 第一步：只发命令本体 (16字节长)
+    const cmd = [
+      CMD.DEBUG_COMMAND, DEBUG_CMD.WRITEMEM_32BIT,
+      addr & 0xFF, (addr >> 8) & 0xFF, (addr >> 16) & 0xFF, (addr >> 24) & 0xFF,
+      4, 0,  // len = 4
+      0, 0, 0, 0, 0, 0, 0, 0
+    ];
+    
+    // 第二步：独立的数据传输包 (4字节)
+    const payload = new Uint8Array([
+      value & 0xFF, (value >> 8) & 0xFF, (value >> 16) & 0xFF, (value >> 24) & 0xFF
+    ]);
+
+    // 第三步：主动查询最近读写状态（与 OpenOCD 时序一致）
+    const getRwStatusCmd = new Uint8Array([
+      CMD.DEBUG_COMMAND, DEBUG_CMD.GET_LAST_RW_STATUS,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ]);
+    
+    try {
+      // 1. 发送命令包
+      const cmdBuf = new Uint8Array(16);
+      cmdBuf.set(cmd.slice(0, 16));
+      let outResult = await this.device.transferOut(this.epOut, cmdBuf);
+      if (outResult.status !== 'ok') throw new Error(`WriteMem32 Cmd transferOut failed: ${outResult.status}`);
+      
+      // 2. 发送独立真实数据
+      outResult = await this.device.transferOut(this.epOut, payload);
+      if (outResult.status !== 'ok') throw new Error(`WriteMem32 Payload transferOut failed: ${outResult.status}`);
+
+      // 3. 发送状态查询命令
+      outResult = await this.device.transferOut(this.epOut, getRwStatusCmd);
+      if (outResult.status !== 'ok') throw new Error(`WriteMem32 GetStatus transferOut failed: ${outResult.status}`);
+
+      // 4. 读取 ST-Link 执行这笔内存写入的状态
+      const r = await Promise.race([
+        this.device.transferIn(this.epIn, 2),
+        new Promise((_, rej) => setTimeout(() => rej(new Error(`writeMem32(0x${addr.toString(16)}) transferIn 超时`)), 500))
+      ]);
+      
+      if (!r.data || r.data.byteLength === 0) {
+        throw new Error('未收到写状态响应');
+      }
+
+      const statusData = new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength);
+      const ok = statusData[0] === STLINK_STATUS_OK || statusData[0] === 0x80;
+      
+      if (!ok) {
+        console.warn(`writeMem32 failed: ST-Link Status 0x${statusData[0].toString(16).padStart(2,'0')}`);
+      }
+      return ok;
+
+    } catch (e) {
+      console.error(e.message);
+      // 通信破裂保护
+      try {
+        await this.device.clearHalt('in', this.epIn);
+      } catch (_) {}
+      return false;
+    }
+  }
+
+  async writeDebugReg32(addr, value) {
+    // 使用 APIV2 WRITEDEBUGREG 写调试/外设寄存器
+    // 对 Flash 控制寄存器（0x400220xx）比 WRITEMEM_32BIT 更稳定
+    const cmd = [
+      CMD.DEBUG_COMMAND, DEBUG_CMD.WRITEDEBUGREG,
+      addr & 0xFF, (addr >> 8) & 0xFF, (addr >> 16) & 0xFF, (addr >> 24) & 0xFF,
+      value & 0xFF, (value >> 8) & 0xFF, (value >> 16) & 0xFF, (value >> 24) & 0xFF
+    ];
+
+    try {
+      const r = await this.xfer(cmd, 2, 500);
+      const ok = r[0] === STLINK_STATUS_OK || r[0] === 0x80;
+      if (!ok) {
+        console.warn(`writeDebugReg32(0x${addr.toString(16)}): ERR 0x${r[0].toString(16).padStart(2,'0')}`);
+      }
+      return ok;
+    } catch (e) {
+      console.error(`writeDebugReg32(0x${addr.toString(16)}): ${e.message}`);
+      return false;
+    }
+  }
+
+  async clearFlashError() {
+    // 清除 Flash 错误状态
+    const FLASH_SR = 0x4002200C;
+    const FLASH_CR = 0x40022010;
+    
+    try {
+      // 读取状态寄存器
+      const sr = await this.readDebugReg32(FLASH_SR);
+      console.log(`Clear Flash Error: 初始 SR=0x${sr.toString(16).padStart(8,'0')}`);
+      
+      // 检查是否有错误位（通常是 bit[2], [3], [4]）
+      const hasError = (sr & 0x1C) !== 0;
+      if (!hasError) {
+        console.log(`Clear Flash Error: 无错误状态`);
+        return true;
+      }
+      
+      // 清除错误位：写入相同的错误位为 1 会清除它们
+      const errorMask = 0x1C;  // 错误位掩码
+      const clearValue = sr | errorMask;  // 在 STM32 Flash SR 中，写 1 清除标志
+      
+      console.log(`Clear Flash Error: 清除错误面具 (写 0x${clearValue.toString(16).padStart(8,'0')} 到 FLASH_SR)`);
+      await this.writeDebugReg32(FLASH_SR, clearValue);
+      
+      // 验证
+      const srAfter = await this.readDebugReg32(FLASH_SR);
+      console.log(`Clear Flash Error: 清除后 SR=0x${srAfter.toString(16).padStart(8,'0')}`);
+      
+      return true;
+    } catch (e) {
+      console.warn(`Clear Flash Error 失败: ${e.message}`);
+      return false;
+    }
+  }
+
+  // STM32F1/GD32F1 Flash 编程支持
+  async flashUnlock() {
+    // Flash 解锁：写入两个密钥到 FLASH_KEYR
+    const FLASH_KEYR = 0x40022004;
+    const FLASH_CR = 0x40022010;
+    const KEY1 = 0x45670123;
+    const KEY2 = 0xCDEF89AB;
+    
+    try {
+      // webstlink 同款前置条件：目标电压过低时禁止编程
+      const voltage = parseFloat(await this.getTargetVoltage());
+      if (Number.isFinite(voltage) && voltage > 0 && voltage < 2.0) {
+        throw new Error(`目标电压过低 (${voltage.toFixed(2)}V)，Flash 编程至少需要 2.0V`);
+      }
+
+      // 0. 对齐 webstlink：先 reset-halt 再解锁
+      const halted = await this.coreResetHalt();
+      if (!halted) throw new Error('core_reset_halt 失败');
+
+      // 1. 写 KEY1
+      console.log('Writing KEY1...');
+      let ok = await this.writeDebugReg32(FLASH_KEYR, KEY1);
+      if (!ok) throw new Error('KEY1 write failed');
+      
+      // 2. 写 KEY2
+      console.log('Writing KEY2...');
+      ok = await this.writeDebugReg32(FLASH_KEYR, KEY2);
+      if (!ok) throw new Error('KEY2 write failed');
+      
+      // 3. 验证：读 FLASH_CR 检查 LOCK 位（bit7）
+      const cr = await this.readDebugReg32(FLASH_CR);
+      console.log(`Flash CR: 0x${cr.toString(16).padStart(8,'0')}`);
+      
+      if ((cr & 0x80) === 0) {
+        console.log('✅ Flash unlocked');
+        return true;
+      }
+      
+      throw new Error('Unlock failed - LOCK bit still set');
+      
+    } catch (e) {
+      console.error(`❌ Flash unlock failed: ${e.message}`);
+      return false;
+    }
+  }
+
+  async flashLock() {
+    // Lock the Flash by setting LOCK bit
+    const FLASH_CR = 0x40022010;
+    
+    try {
+      const cr = await this.readDebugReg32(FLASH_CR);
+      const newCR = cr | 0x80;  // Set LOCK bit
+      
+      console.log(`Flash Lock: 设置 LOCK 位 (CR: 0x${cr.toString(16).padStart(8,'0')} -> 0x${newCR.toString(16).padStart(8,'0')})`);
+      const ok = await this.writeDebugReg32(FLASH_CR, newCR);
+      
+      if (ok) {
+        const crAfter = await this.readDebugReg32(FLASH_CR);
+        console.log(`✓ Flash 已上锁 (CR=0x${crAfter.toString(16).padStart(8,'0')})`);
+      }
+      
+      return ok;
+    } catch (e) {
+      console.warn(`Flash 上锁失败: ${e.message}`);
+      return false;
+    }
+  }
+
+  async flashErasePage(pageAddr) {
+    // Erase a single Flash page
+    // For STM32F1/GD32F1: page size is 1KB
+    // Flash CR: bit[1]=PER (Page Erase), bit[6]=STRT (Start)
+    
+    const FLASH_CR = 0x40022010;
+    const FLASH_AR = 0x40022014;
+    const FLASH_SR = 0x4002200C;
+    
+    try {
+      // Step 1: Set PER (Page Erase) bit
+      let cr = await this.readDebugReg32(FLASH_CR);
+      cr |= 0x02;  // PER = 1
+      await this.writeDebugReg32(FLASH_CR, cr);
+      
+      // Step 2: Set target address
+      await this.writeDebugReg32(FLASH_AR, pageAddr);
+      
+      // Step 3: Set STRT (Start) bit
+      cr |= 0x40;  // STRT = 1
+      await this.writeDebugReg32(FLASH_CR, cr);
+      
+      // Step 4: Wait for completion (poll BSY bit) - 最多 5 秒
+      const startTime = Date.now();
+      const maxWait = 5000;
+      while (Date.now() - startTime < maxWait) {
+        const sr = await this.readDebugReg32(FLASH_SR);
+        if ((sr & 0x01) === 0) {  // BSY clear
+          break;
+        }
+        await new Promise(r => setTimeout(r, 5));
+      }
+      
+      // Step 5: Clear PER bit
+      cr = await this.readDebugReg32(FLASH_CR);
+      cr &= ~0x02;  // PER = 0
+      await this.writeDebugReg32(FLASH_CR, cr);
+      
+      return true;
+    } catch (e) {
+      console.warn(`页擦除失败 (0x${pageAddr.toString(16)}): ${e.message}`);
+      return false;
+    }
+  }
+
+  // ─── ARM Flash 写入器 (性能优化) ───
+
+  async loadFlashWriter() {
+    // 加载真实的 ARM Thumb Flash 编程器到 SRAM 0x20000000
+    // GD32F1 Flash 编程 - 完全硬件执行，无 JavaScript 干预
+    // 参数约定：
+    // R0 = 源地址 (SRAM 缓冲区，包含要写入的数据)
+    // R1 = 目标 Flash 地址
+    // R2 = 字数 (以半字 2 字节为单位)
+    // R3 = FLASH_CR (0x40022010)
+    // R4 = FLASH_SR (0x4002200C)
+    // R5 = FLASH_KEYR (0x40022004)
+    
+    // 对齐 webstlink/pystlink 的 STM32F1/F0/F3 写入算法
+    // 该算法依赖：R4=FLASH_SR, R5=BSY bit, R6=EOP bit，且 PG 位由外部预先置位
+    const FLASH_WRITER = new Uint8Array([
+      // write:
+      0x03, 0x88,  // ldrh r3, [r0]
+      0x0B, 0x80,  // strh r3, [r1]
+      // test_busy:
+      0x23, 0x68,  // ldr  r3, [r4]
+      0x2B, 0x42,  // tst  r3, r5
+      0xFC, 0xD1,  // bne  test_busy
+      0x33, 0x42,  // tst  r3, r6
+      0x04, 0xD0,  // beq  exit
+      0x02, 0x30,  // adds r0, #2
+      0x02, 0x31,  // adds r1, #2
+      0x02, 0x3A,  // subs r2, #2
+      0x00, 0x2A,  // cmp  r2, #0
+      0xF3, 0xD1,  // bne  write
+      // exit:
+      0x00, 0xBE,  // bkpt 0
+    ]);
+    
+    try {
+      // 加载程序到 SRAM
+      await this.writeMem8(0x20000000, FLASH_WRITER);
+      console.log('✓ ARM Flash writer loaded to SRAM at 0x20000000');
+      return true;
+    } catch (e) {
+      console.warn(`Failed to load flash writer: ${e.message}`);
+      return false;
+    }
+  }
+
+  async flashBlockWithARM(baseAddr, dataArray, offset = 0, length = 256) {
+    // ARM 硬件加速块写入：加载数据 → 设置寄存器 → 执行 ARM 程序 → 等待完成
+    let blockData = dataArray.slice(offset, offset + length);
+    if (blockData.length === 0) return true;
+
+    // Flash writer 使用 halfword 写入，保证偶数字节长度
+    if ((blockData.length & 1) !== 0) {
+      const padded = new Uint8Array(blockData.length + 1);
+      padded.set(blockData, 0);
+      padded[blockData.length] = 0xFF;
+      blockData = padded;
+    }
+    
+    try {
+      const FLASH_CR = 0x40022010;
+
+      // 1. 先加载 ARM Flash 程序到 SRAM (0x20000000)
+      if (!this.armLoaded) {
+        if (!await this.loadFlashWriter()) {
+          console.warn("ARM Flash 程序加载失败");
+          return false;
+        }
+        this.armLoaded = true;
+      }
+      
+      // 2. 数据写入到 SRAM 数据区 (0x20000100)
+      await this.writeMem8(0x20000100, blockData);
+      
+      // 3. 设置 ARM 寄存器参数：
+      //    R0 = 源地址 (0x20000100 - SRAM 数据)
+      //    R1 = 目标地址 (Flash 地址)
+      //    R2 = 字节数（算法内部每次减2）
+      //    R4 = FLASH_SR, R5 = BSY bit, R6 = EOP bit
+      await this.setReg(0, 0x20000100);           // R0: 数据源
+      await this.setReg(1, baseAddr);             // R1: Flash 目标地址
+      await this.setReg(2, blockData.length);     // R2: 字节数
+      await this.setReg(4, 0x4002200C);           // R4: FLASH_SR
+      await this.setReg(5, 0x00000001);           // R5: BSY bit
+      await this.setReg(6, 0x00000020);           // R6: EOP bit
+      await this.setReg(15, 0x20000001);          // PC: SRAM 写入器入口（Thumb）
+
+      // 运行算法前预置 PG 位
+      const cr = await this.readDebugReg32(FLASH_CR);
+      await this.writeDebugReg32(FLASH_CR, cr | 0x01);
+      
+      // 4. 执行 ARM 程序
+      await this.core_run();
+      
+      // 5. 等待 BKPT 信号（超时 5 秒）
+      if (!await this.waitForBreakpoint(5000)) {
+        console.warn(`块写入超时 (0x${baseAddr.toString(16)})，回退到 direct 编程...`);
+        return await this.flashBlockDirect(baseAddr, blockData);
+      }
+      
+      return true;
+      
+    } catch (e) {
+      console.warn(`块写入失败 (0x${baseAddr.toString(16)}): ${e.message}，回退到 direct 编程...`);
+      return await this.flashBlockDirect(baseAddr, blockData);
+    }
+  }
+
+  async flashBlockDirect(baseAddr, blockData) {
+    // 回退方案：按 F1/GD32F1 手册执行半字编程
+    const FLASH_CR = 0x40022010;
+    const FLASH_SR = 0x4002200C;
+    const FLASH_CR_PG_BIT = 0x01;
+
+    try {
+      let cr = await this.readDebugReg32(FLASH_CR);
+      await this.writeDebugReg32(FLASH_CR, cr | FLASH_CR_PG_BIT);
+
+      for (let i = 0; i < blockData.length; i += 2) {
+        const half = new Uint8Array([
+          blockData[i] ?? 0xFF,
+          blockData[i + 1] ?? 0xFF,
+        ]);
+
+        const ok = await this.writeMem8(baseAddr + i, half);
+        if (!ok) {
+          throw new Error(`writeMem8-halfword failed @0x${(baseAddr + i).toString(16)}`);
+        }
+
+        const waitStart = Date.now();
+        let sr = 0;
+        while ((Date.now() - waitStart) < 200) {
+          sr = await this.readDebugReg32(FLASH_SR);
+          if ((sr & 0x01) === 0) break; // BSY clear
+          await new Promise(r => setTimeout(r, 1));
+        }
+
+        if ((sr & 0x14) !== 0) {
+          throw new Error(`FLASH_SR error=0x${sr.toString(16)}`);
+        }
+
+        if ((sr & 0x20) !== 0) {
+          await this.writeDebugReg32(FLASH_SR, 0x20); // clear EOP
+        }
+      }
+
+      cr = await this.readDebugReg32(FLASH_CR);
+      await this.writeDebugReg32(FLASH_CR, cr & ~FLASH_CR_PG_BIT);
+      return true;
+    } catch (e) {
+      console.warn(`direct 编程失败 (0x${baseAddr.toString(16)}): ${e.message}`);
+      try {
+        const cr = await this.readDebugReg32(FLASH_CR);
+        await this.writeDebugReg32(FLASH_CR, cr & ~FLASH_CR_PG_BIT);
+      } catch (_) {}
+      return false;
+    }
+  }
+
+  async readIDCODE() {
+    // 尝试用 READREG 寄存器读取方式来读 IDCODE
+    // 注意：在 SWD 模式下，这相当于读取 CoreSight IDCODE 寄存器
+    try {
+      // 方式1：直接通过 READMEM 读取
+      const idcode = await this.readMem32(ARM_IDCODE_ADDR);
+      console.log(`readIDCODE via READMEM: 0x${idcode.toString(16)}`);
+      return idcode;
+    } catch(e) {
+      console.warn(`readIDCODE via READMEM 失败: ${e.message}`);
+      throw e;
+    }
+  }
+}
+
+// ─────────────────────────────────────────
+// 已知 IDCODE 数据库
+// ─────────────────────────────────────────
+const IDCODE_DB = {
+  0x10016413: { model: 'STM32F405/407/415/417', core: 'Cortex-M4', flash: '1MB', sram: '192KB' },
+  0x10036413: { model: 'STM32F42x/43x',         core: 'Cortex-M4', flash: '2MB', sram: '256KB' },
+  0x20016419: { model: 'STM32F40x/41x Rev B',   core: 'Cortex-M4', flash: '1MB', sram: '192KB' },
+  0x10016411: { model: 'STM32F2xx',             core: 'Cortex-M3', flash: '1MB', sram: '128KB' },
+  0x10016420: { model: 'STM32F410',             core: 'Cortex-M4', flash: '128KB', sram: '32KB' },
+  0x20016421: { model: 'STM32F446',             core: 'Cortex-M4', flash: '512KB', sram: '128KB' },
+  0x10016434: { model: 'STM32F469/479',         core: 'Cortex-M4', flash: '2MB', sram: '384KB' },
+  0x10016449: { model: 'STM32F74x/75x',         core: 'Cortex-M7', flash: '1MB', sram: '512KB' },
+  0x10016451: { model: 'STM32F76x/77x',         core: 'Cortex-M7', flash: '2MB', sram: '512KB' },
+  0x10016450: { model: 'STM32H74x/75x',         core: 'Cortex-M7', flash: '2MB', sram: '1MB' },
+  0x10016458: { model: 'STM32H7Ax/7Bx',         core: 'Cortex-M7', flash: '2MB', sram: '1.4MB' },
+  0x20016410: { model: 'STM32F101xx Med',        core: 'Cortex-M3', flash: '128KB', sram: '20KB' },
+  0x20036410: { model: 'STM32F103xx Med',        core: 'Cortex-M3', flash: '128KB', sram: '20KB' },
+  0x00016410: { model: 'STM32F103xx Ld',         core: 'Cortex-M3', flash: '64KB', sram: '20KB' },
+  0x30016410: { model: 'STM32F103xx Hi',         core: 'Cortex-M3', flash: '512KB', sram: '64KB' },
+  0x10016460: { model: 'STM32G07x/08x',          core: 'Cortex-M0+', flash: '64KB', sram: '36KB' },
+  0x10016467: { model: 'STM32G071/081',          core: 'Cortex-M0+', flash: '128KB', sram: '36KB' },
+  0x10016495: { model: 'STM32WBxx',             core: 'Cortex-M4+M0', flash: '1MB', sram: '256KB' },
+};
+
+function lookupIDCODE(idcode) {
+  const entry = IDCODE_DB[idcode];
+  if (entry) return entry;
+  // Try masking revision
+  const masked = idcode & 0x0FFFFFFF;
+  for (const [k, v] of Object.entries(IDCODE_DB)) {
+    if ((parseInt(k) & 0x0FFFFFFF) === masked) return v;
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────
+// UI
+// ─────────────────────────────────────────
+const stlink = new STLinkUSB();
+let connected = false;
+
+const $  = id => document.getElementById(id);
+const log = (msg, cls = '') => {
+  const el = document.createElement('div');
+  el.className = 'log-line' + (cls ? ' ' + cls : '');
+  const now = new Date();
+  const ts = `[${now.toTimeString().slice(0,8)}]`;
+  el.textContent = `${ts} ${msg}`;
+  $('log').appendChild(el);
+  $('log').scrollTop = $('log').scrollHeight;
+};
+
+const setStatus = (text, type = '') => {
+  const dot = $('status-dot');
+  const st  = $('status-text');
+  dot.className  = 'status-dot' + (type ? ' '+type : '');
+  st.className   = type;
+  st.textContent = text;
+};
+
+const setBusy = (on) => {
+  const pw = $('progress-wrap');
+  on ? pw.classList.add('show') : pw.classList.remove('show');
+  $('btn-read').disabled = on || !connected;
+};
+
+// WebUSB 检测
+if (!navigator.usb) {
+  $('not-supported').style.display = 'block';
+  log('WebUSB API 不可用，请使用 Chrome/Edge 桌面版', 'err');
+} else {
+  log('WebUSB API 就绪，请连接 ST-Link 设备', 'info');
+}
+
+// ── 弹窗控制 ──
+function showConflictModal() {
+  document.getElementById('modal-conflict').classList.add('show');
+}
+function closeModal() {
+  document.getElementById('modal-conflict').classList.remove('show');
+}
+function copyKillCmd(el) {
+  const cmd = 'pkill -f "ST-LINK_gdbserver"; pkill -f "STLinkUSBDriver"; pkill -f "st-util"';
+  navigator.clipboard.writeText(cmd).then(() => {
+    const hint = document.getElementById('copy-hint');
+    hint.textContent = '✔ 已复制';
+    hint.style.color = 'var(--green)';
+    setTimeout(() => { hint.textContent = '点击复制'; hint.style.color = ''; }, 2500);
+  });
+}
+function triggerReconnect() {
+  // 短暂延迟，给用户时间完成拔插
+  setTimeout(() => document.getElementById('btn-connect').click(), 300);
+}
+// 点击遮罩关闭
+document.getElementById('modal-conflict').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+// ─────────────────────────────────────────
+// HEX 文件解析器
+// ─────────────────────────────────────────
+class HexParser {
+  static parse(hexContent) {
+    // 解析 Intel HEX 格式文件
+    // 返回 { segments: [{addr, data: Uint8Array}, ...], totalSize }
+    
+    const lines = hexContent.split(/\n/);
+    const segments = [];
+    let highAddr = 0;
+    let currentAddr = null;
+    let currentData = [];
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed[0] !== ':') continue;
+      
+      try {
+        const byteCount = parseInt(trimmed.substr(1, 2), 16);
+        const addr = parseInt(trimmed.substr(3, 4), 16);
+        const recType = parseInt(trimmed.substr(7, 2), 16);
+        const data = [];
+        
+        for (let i = 0; i < byteCount; i++) {
+          data.push(parseInt(trimmed.substr(9 + i * 2, 2), 16));
+        }
+        
+        const fullAddr = (highAddr << 16) | addr;
+        
+        if (recType === 0x00) {
+          // 数据记录
+          if (currentAddr === null) {
+            currentAddr = fullAddr;
+          } else if (fullAddr !== currentAddr + currentData.length) {
+            // 地址不连续，保存当前段
+            segments.push({ addr: currentAddr, data: new Uint8Array(currentData) });
+            currentAddr = fullAddr;
+            currentData = [];
+          }
+          currentData.push(...data);
+        } else if (recType === 0x01) {
+          // 文件结束
+          if (currentData.length > 0) {
+            segments.push({ addr: currentAddr, data: new Uint8Array(currentData) });
+          }
+          break;
+        } else if (recType === 0x04) {
+          // 高地址记录
+          if (currentData.length > 0) {
+            segments.push({ addr: currentAddr, data: new Uint8Array(currentData) });
+            currentAddr = null;
+            currentData = [];
+          }
+          highAddr = (data[0] << 8) | data[1];
+        }
+      } catch (e) {
+        console.warn('HEX 行解析失败:', trimmed);
+      }
+    }
+    
+    // 保存最后一段
+    if (currentData.length > 0) {
+      segments.push({ addr: currentAddr, data: new Uint8Array(currentData) });
+    }
+    
+    const totalSize = segments.reduce((sum, seg) => sum + seg.data.length, 0);
+    return { segments, totalSize };
+  }
+}
+
+// ─────────────────────────────────────────
+// 编程状态和进度
+// ─────────────────────────────────────────
+let firmwareData = null;
+let firmwareInfo = { size: 0, format: '', segments: 0, addrRange: '' };
+
+const updateFileInfo = () => {
+  if (!firmwareData) {
+    $('file-info').textContent = '未选择';
+    $('file-stats').textContent = '-- 未加载固件 --';
+    return;
+  }
+  
+  const { segments, totalSize } = firmwareData;
+  if (segments.length === 0) {
+    $('file-stats').textContent = '错误：无有效数据';
+    return;
+  }
+  
+  const minAddr = Math.min(...segments.map(s => s.addr));
+  const maxAddr = Math.max(...segments.map(s => s.addr + s.data.length - 1));
+  
+  const sizeKB = (totalSize / 1024).toFixed(2);
+  const stats = `
+    格式：${firmwareInfo.format}
+    大小：${totalSize} 字节 (${sizeKB} KB)
+    段数：${segments.length}
+    地址范围：0x${minAddr.toString(16).toUpperCase().padStart(8, '0')} ~ 0x${maxAddr.toString(16).toUpperCase().padStart(8, '0')}
+  `.trim().split('\n').map(s => s.trim()).join('\n');
+  
+  $('file-stats').textContent = stats;
+  $('file-info').textContent = `✓ 已加载 (${sizeKB} KB)`;
+  $('btn-program').disabled = !connected;
+};
+
+$('file-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) {
+    firmwareData = null;
+    updateFileInfo();
+    return;
+  }
+  
+  try {
+    const content = await file.text();
+    
+    if (file.name.endsWith('.hex')) {
+      firmwareData = HexParser.parse(content);
+      firmwareInfo.format = 'Intel HEX';
+    } else if (file.name.endsWith('.bin')) {
+      // BIN 文件：直接作为数据，地址从 0x08000000 开始（STM32 Flash 基址）
+      const binData = new Uint8Array(await file.arrayBuffer());
+      firmwareData = {
+        segments: [{ addr: 0x08000000, data: binData }],
+        totalSize: binData.length
+      };
+      firmwareInfo.format = 'Binary';
+    } else {
+      throw new Error('不支持的文件格式（需要 .hex 或 .bin）');
+    }
+    
+    updateFileInfo();
+    log(`✓ 固件文件已加载: ${file.name}`, 'ok');
+  } catch (err) {
+    log(`✗ 固件加载失败: ${err.message}`, 'err');
+    firmwareData = null;
+    updateFileInfo();
+  }
+});
+
+const updateProgramProgress = (step, current, total) => {
+  const percent = Math.round((current / total) * 100);
+  $('progress-step').textContent = step;
+  $('progress-percent').textContent = `${percent}%`;
+  $('progress-bar-program').style.width = `${percent}%`;
+  $('progress-detail').textContent = `${(current / 1024).toFixed(2)} / ${(total / 1024).toFixed(2)} KB`;
+};
+
+$('btn-program').addEventListener('click', async () => {
+  if (!connected || !firmwareData) {
+    log('✗ 未连接或未加载固件', 'err');
+    return;
+  }
+  
+  $('btn-program').disabled = true;
+  $('progress-program').style.display = 'block';
+  
+  
+  try {
+    log('────────────────────────────', 'info');
+    log('开始固件编程...', 'info');
+    log('────────────────────────────', 'info');
+    
+    // 清理旧状态
+    log('清理设备状态...', 'info');
+    await stlink.leaveState();
+    await new Promise(r => setTimeout(r, 500));
+    
+    // 进入调试模式
+    log('进入 SWD 调试模式...', 'info');
+    await stlink.enterDebugSWD();
+    
+    // SWD 频率：固定 4MHz
+    log('设置 SWD 频率...', 'info');
+    await stlink.setSWDFreq(4000000);  // 4MHz
+    await new Promise(r => setTimeout(r, 300));
+    
+    // OpenOCD 预热策略：USB 通信热启动
+    log('预热 USB 和 SWD 通信...', 'info');
+    try {
+      // 清理端点悬挂数据
+      await stlink.device.clearHalt('in', stlink.epIn);
+      await stlink.device.clearHalt('out', stlink.epOut);
+      
+      // 测试读操作（DHCSR 寄存器）来确保通信正常
+      for (let warmup = 0; warmup < 2; warmup++) {
+        try {
+          const testVal = await stlink.readMem32(0xE000EDF0);  // DHCSR
+          console.log(`USB 预热 #${warmup+1}: OK (DHCSR=0x${testVal.toString(16)})`);
+        } catch (e) {
+          console.warn(`USB 预热 #${warmup+1} 失败，重试...`);
+        }
+        await new Promise(r => setTimeout(r, 50));
+      }
+    } catch (e) {
+      console.warn(`USB 预热异常: ${e.message}`);
+    }
+    await new Promise(r => setTimeout(r, 200));
+    
+    // Halt 芯片并验证
+    log('暂停目标芯片...', 'info');
+    const halted = await stlink.haltCoreAndCheck(1200);
+    if (!halted) {
+      throw new Error('目标内核未进入 HALT 状态');
+    }
+    await new Promise(r => setTimeout(r, 200));
+    
+    // 清除 Flash 错误状态
+    log('清除 Flash 错误状态...', 'info');
+    await stlink.clearFlashError();
+    await new Promise(r => setTimeout(r, 500));
+    
+    // 解锁 Flash
+    log('解锁 Flash 存储器...', 'info');
+    const unlocked = await stlink.flashUnlock();
+    if (!unlocked) {
+      throw new Error('Flash 解锁失败，可能是硬件问题或芯片未连接');
+    }
+    await new Promise(r => setTimeout(r, 100));
+    
+    const { segments } = firmwareData;
+    let totalProgrammed = 0;
+    const totalSize = segments.reduce((sum, seg) => sum + seg.data.length, 0);
+    
+    // 可选：全片擦除
+    if ($('opt-erase-all').checked) {
+      log('执行全片擦除（较耗时，请等待）...', 'warn');
+      const pageSize = 1024;  // STM32F1/GD32F1 页大小
+      const maxPages = 512;   // 最多 512KB / 1KB
+      
+      for (let p = 0; p < maxPages; p++) {
+        const pageAddr = 0x08000000 + (p * pageSize);
+        const ok = await stlink.flashErasePage(pageAddr);
+        
+        if ((p + 1) % 64 === 0) {
+          log(`  ▕ 已擦除 ${p + 1} 页...`, 'info');
+        }
+        
+        if (!ok) {
+          console.warn(`页擦除可能失败于 0x${pageAddr.toString(16)}`);
+        }
+      }
+      log('✓ 全片擦除完成', 'ok');
+    } else {
+      // 部分擦除：只擦除将要编程的页
+      log('擦除目标页面...', 'info');
+      const pageSize = 1024;
+      const pagesToErase = new Set();
+      
+      for (const seg of segments) {
+        for (let addr = seg.addr; addr < seg.addr + seg.data.length; addr += pageSize) {
+          const pageStart = Math.floor(addr / pageSize) * pageSize;
+          pagesToErase.add(pageStart);
+        }
+      }
+      
+      let erased = 0;
+      for (const pageAddr of pagesToErase) {
+        const ok = await stlink.flashErasePage(pageAddr);
+        erased++;
+        if (!ok) {
+          console.warn(`页擦除可能失败于 0x${pageAddr.toString(16)}`);
+        }
+      }
+      
+      log(`✓ 已擦除 ${erased} 个页面`, 'ok');
+    }
+    
+    await new Promise(r => setTimeout(r, 100));
+    
+    // 编程每个段
+    log('开始写入数据 (使用块优化)...', 'info');
+    
+    const BLOCK_SIZE = 256;  // 每块 256 字节 (平衡 USB 往返和操作数)
+    let lastSegIndex = -1;
+    
+    for (let segIdx = 0; segIdx < segments.length; segIdx++) {
+      const segment = segments[segIdx];
+      const { addr, data } = segment;
+      
+      if (segIdx !== lastSegIndex) {
+        log(`▸ 段 ${segIdx + 1}/${segments.length}: 0x${addr.toString(16).toUpperCase().padStart(8, '0')} (${data.length} 字节)`, 'info');
+        lastSegIndex = segIdx;
+      }
+      
+      // 块写入循环
+      for (let offset = 0; offset < data.length; offset += BLOCK_SIZE) {
+        const blockSize = Math.min(BLOCK_SIZE, data.length - offset);
+        const blockAddr = addr + offset;
+        
+        try {
+          const ok = await stlink.flashBlockWithARM(blockAddr, data, offset, blockSize);
+          if (!ok) {
+            throw new Error(`块写入失败`);
+          }
+          
+          totalProgrammed += blockSize;
+          
+          // 每 512 字节更新一次进度
+          if ((totalProgrammed % 512) === 0 || totalProgrammed === totalSize) {
+            updateProgramProgress(`段 ${segIdx + 1}/${segments.length}`, totalProgrammed, totalSize);
+          }
+          
+        } catch (e) {
+          throw new Error(`编程失败于地址 0x${blockAddr.toString(16)}: ${e.message}`);
+        }
+      }
+    }
+    
+    log(`✓ 数据写入完成 (总计 ${totalSize} 字节)`, 'ok');
+    
+    // 可选：验证
+    if ($('opt-verify').checked) {
+      log('验证编程数据...', 'info');
+      updateProgramProgress('验证中', 0, totalSize);
+      
+      let verified = 0;
+      for (let segIdx = 0; segIdx < segments.length; segIdx++) {
+        const { addr, data } = segments[segIdx];
+        
+        for (let i = 0; i < data.length; i += 4) {
+          const readAddr = addr + i;
+          const readVal = await stlink.readMem32(readAddr);
+          
+          let expectedVal = 0;
+          for (let j = 0; j < 4 && i + j < data.length; j++) {
+            expectedVal |= (data[i + j] << (j * 8));
+          }
+          
+          if (readVal !== expectedVal) {
+            throw new Error(`验证失败于 0x${readAddr.toString(16)}: 期望 0x${expectedVal.toString(16).padStart(8, '0')}, 实际 0x${readVal.toString(16).padStart(8, '0')}`);
+          }
+          
+          verified += 4;
+          
+          if ((verified % 256) === 0) {
+            updateProgramProgress('验证中', verified, totalSize);
+          }
+        }
+      }
+      
+      log(`✓ 验证成功 (${totalSize} 字节)`, 'ok');
+    }
+    
+    // 运行芯片
+    log('启动目标芯片...', 'info');
+    try {
+      await Promise.race([
+        stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.RUNCORE], 2),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('RUNCORE 超时')), 2000))
+      ]);
+      await new Promise(r => setTimeout(r, 500));
+    } catch (e) {
+      console.warn(`⚠️ RUNCORE 失败但继续: ${e.message}`);
+    }
+    
+    log('────────────────────────────', 'ok');
+    log('✓ 固件更新完成！', 'ok');
+    log('────────────────────────────', 'ok');
+    
+  } catch (err) {
+    log(`────────────────────────────`, 'err');
+    log(`✗ 编程失败: ${err.message}`, 'err');
+    log(`────────────────────────────`, 'err');
+    console.error(err);
+  } finally {
+    // 清理 - 所有操作都有内置的快速失败超时
+    try {
+      log('上锁 Flash...', 'info');
+      await stlink.flashLock().catch(() => {});
+      
+      // RUNCORE 1.5秒快速失败
+      try {
+        await Promise.race([
+          stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.RUNCORE], 2),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('RUNCORE超时')), 1500))
+        ]);
+      } catch (e) {
+        console.warn(`⚠️ RUNCORE 失败: ${e.message}`);
+      }
+      
+      // leaveState 会按当前模式智能清理（避免重复 EXIT）
+      await stlink.leaveState().catch(() => {});
+    } catch (_) {}
+    
+    $('btn-program').disabled = !connected;
+    $('progress-program').style.display = 'none';
+  }
+});
+
+$('btn-connect').addEventListener('click', async () => {
+  if (!navigator.usb) return;
+  try {
+    setStatus('正在连接...', 'busy');
+    log('━━━ 开始连接诊断 ━━━', 'info');
+
+    // ── Step 1: requestDevice ──
+    log('[1/4] 请求 USB 设备选择...', 'info');
+    const filters = [
+      { vendorId: STLINK_VID, productId: STLINK_PID_V2 },
+      { vendorId: STLINK_VID, productId: STLINK_PID_V21 },
+    ];
+    let device;
+    try {
+      device = await navigator.usb.requestDevice({ filters });
+      log(`  ✔ 已选择设备: ${device.productName || '未知'} (VID=${device.vendorId.toString(16)} PID=${device.productId.toString(16)})`, 'ok');
+    } catch(e1) {
+      if (e1.name === 'NotFoundError') {
+        log('  ✘ 用户取消选择，或设备列表为空', 'warn');
+        log('  → 检查 ST-Link 是否已插入 USB', 'warn');
+        setStatus('未选择设备', '');
+      } else {
+        log(`  ✘ requestDevice 失败: [${e1.name}] ${e1.message}`, 'err');
+        setStatus('连接失败 (Step 1)', 'error');
+      }
+      return;
+    }
+
+    stlink.device = device;
+
+    // ── Step 2: open ──
+    log('[2/4] 打开 USB 设备...', 'info');
+    try {
+      await device.open();
+      log(`  ✔ 设备已打开  state=${device.state}`, 'ok');
+    } catch(e2) {
+      log(`  ✘ open() 失败: [${e2.name}] ${e2.message}`, 'err');
+      log('  → 可能原因: macOS 上 libusb 残留句柄，请拔插 USB 后重试', 'warn');
+      setStatus('连接失败 (open)', 'error');
+      showConflictModal();
+      return;
+    }
+
+    // ── Step 3: selectConfiguration ──
+    log('[3/4] 选择 USB 配置...', 'info');
+    try {
+      if (device.configuration === null) {
+        await device.selectConfiguration(1);
+        log('  ✔ 已选择 configuration 1', 'ok');
+      } else {
+        log(`  ✔ 已有配置 #${device.configuration.configurationValue}`, 'ok');
+      }
+    } catch(e3) {
+      log(`  ✘ selectConfiguration 失败: [${e3.name}] ${e3.message}`, 'err');
+      setStatus('连接失败 (config)', 'error');
+      return;
+    }
+
+    // ── 列出所有接口 ──
+    const ifaces = device.configuration.interfaces;
+    log(`  ℹ 设备共有 ${ifaces.length} 个接口`, 'info');
+    ifaces.forEach(i => {
+      const alt = i.alternate;
+      log(`    Interface ${i.interfaceNumber}: class=${alt.interfaceClass} subclass=${alt.interfaceSubclass} proto=${alt.interfaceProtocol}`, '');
+    });
+
+    // ── Step 4: claimInterface ──
+    log('[4/4] 申请接口 #0...', 'info');
+    try {
+      await device.claimInterface(0);
+      log('  ✔ 接口 #0 已申请', 'ok');
+    } catch(e4) {
+      log(`  ✘ claimInterface(0) 失败: [${e4.name}] ${e4.message}`, 'err');
+      if (e4.name === 'NetworkError' || e4.message.includes('Unable to claim')) {
+        log('  → 这是 macOS WebUSB 的已知限制:', 'warn');
+        log('    macOS 会为 HID/厂商类设备附加内核驱动，阻止 claimInterface', 'warn');
+        log('    请拔插 USB 后在 5 秒内立即点连接（不要运行其他工具）', 'warn');
+      }
+      setStatus('连接失败 (claimInterface)', 'error');
+      showConflictModal();
+      return;
+    }
+
+    // ── 找端点 + 打印详情 ──
+    const alt = device.configuration.interfaces[0].alternate;
+    log('  ━━ 端点详情 ━━', 'info');
+    const epList = [];
+    for (const ep of alt.endpoints) {
+      log(`    ep${ep.endpointNumber}: dir=${ep.direction} type=${ep.type} packetSize=${ep.packetSize}`, 'info');
+      epList.push(ep);
+    }
+    const inEps  = epList.filter(e => e.direction === 'in').sort((a,b) => a.endpointNumber - b.endpointNumber);
+    const outEps = epList.filter(e => e.direction === 'out').sort((a,b) => a.endpointNumber - b.endpointNumber);
+    stlink.epIn  = inEps[0].endpointNumber;
+    stlink.epOut = outEps[0].endpointNumber;
+    log(`  ✔ 使用端点: IN=ep${stlink.epIn} OUT=ep${stlink.epOut}`, 'ok');
+    if (inEps.length > 1) log(`  ℹ ep${inEps[1].endpointNumber}(IN) = SWO/trace`, 'info');
+
+    // ── clearHalt 所有端点（claimInterface 后必须做）──
+    log('  → clearHalt 所有端点...', 'info');
+    for (const ep of epList) {
+      try {
+        await device.clearHalt(ep.direction, ep.endpointNumber);
+        log(`  ✔ clearHalt(${ep.direction}, ep${ep.endpointNumber})`, 'ok');
+      } catch(eh) {
+        log(`  ⚠ clearHalt(${ep.direction}, ep${ep.endpointNumber}): ${eh.message}`, 'warn');
+      }
+    }
+
+    // ── 读取版本（统一用 xfer()）──
+    connected = true;
+    log('读取固件版本...', 'info');
+    let ver;
+    try {
+      const r = await stlink.xfer([CMD.GET_VERSION], 6);
+      log(`  ✔ 原始响应: [${Array.from(r).map(x=>x.toString(16).padStart(2,'0')).join(' ')}]`, 'ok');
+      const word = (r[0] << 8) | r[1];
+      const sv = (word >> 12) & 0xF;
+      const jv = (word >> 6)  & 0x3F;
+      const wv =  word        & 0x3F;
+      ver = `V${sv}J${jv}S${wv}`;
+      $('info-stlink').textContent = ver;
+      log(`  ✔ 固件版本: ${ver}`, 'ok');
+    } catch(ev) {
+      log(`  ✘ 版本读取失败: ${ev.message}`, 'err');
+      connected = false;
+      setStatus('版本读取失败', 'error');
+      return;
+    }
+
+    log('读取目标电压...', 'info');
+    let vdd = '—';
+    try {
+      const rv = await stlink.xfer([CMD.GET_TARGET_VOLTAGE], 8);
+      const factor  = (rv[3]<<24)|(rv[2]<<16)|(rv[1]<<8)|rv[0];
+      const reading = (rv[7]<<24)|(rv[6]<<16)|(rv[5]<<8)|rv[4];
+      if (factor > 0) {
+        vdd = (2 * reading * 1.2 / factor).toFixed(2);
+        $('info-vdd').textContent = vdd + ' V';
+        log(`  ✔ 目标电压: ${vdd} V`, 'ok');
+      } else {
+        log('  ⚠ 电压因子为0，跳过', 'warn');
+      }
+    } catch(ev) {
+      log(`  ⚠ 电压读取失败: ${ev.message}`, 'warn');
+    }
+
+    setStatus(`已连接 ${device.productName || 'ST-Link'} (${ver})`, 'connected');
+    log(`✔ 连接成功: ${ver}  Vdd=${vdd}V`, 'ok');
+    log('━━━ 诊断完成 ━━━', 'ok');
+
+    $('btn-connect').style.display = 'none';
+    $('btn-disconnect').style.display = 'inline-flex';
+    $('btn-read').disabled = false;
+
+  } catch(e) {
+    setStatus('连接失败', 'error');
+    log(`✘ 未预期错误: [${e.name}] ${e.message}`, 'err');
+    log(`  stack: ${(e.stack||'').split('\n')[1]||''}`, 'err');
+    log(`━━━ 诊断标准检查清单 ━━━`, 'warn');
+    log(`⬜ ST-Link LED 状态是否显示？`, 'warn');
+    log(`   🟢 绿色 = 通信正常 | 🔴 红色 = 调试链路故障`, 'warn');
+    log(`⬜ 检查 SWD 接线：SWDIO(1) SWCLK(2) GND(3) VDD(4)`, 'warn');
+    log(`⬜ 确认目标芯片供电（3.3V 或 1.8V）`, 'warn');
+    log(`⬜ 尝试降低 SWD 频率至 125 kHz`, 'warn');
+  }
+});
+
+$('btn-disconnect').addEventListener('click', async () => {
+  await stlink.disconnect();
+  connected = false;
+  setStatus('未连接 ST-Link 设备');
+  $('btn-connect').style.display = 'inline-flex';
+  $('btn-disconnect').style.display = 'none';
+  $('btn-read').disabled = true;
+  log('已断开连接', 'warn');
+});
+
+$('btn-read').addEventListener('click', async () => {
+  if (!connected) return;
+  setBusy(true);
+  log('─────────────────────────────', '');
+  log('开始读取 Chip ID...', 'info');
+  try {
+    // 清理旧调试状态（必须在进入新的 SWD 之前）
+    log('清理旧调试状态...', 'info');
+    try {
+      await stlink.leaveState();
+      await new Promise(r => setTimeout(r, 200));  // 仅最小延迟用于状态切换
+      log('  ✔ 旧状态已清理', 'ok');
+    } catch(e) {
+      log(`  ⚠ 清理旧状态异常: ${e.message}`, 'warn');
+    }
+
+    // 进入 SWD 调试模式
+    log('进入 SWD 调试模式...', 'info');
+    await stlink.enterDebugSWD();
+    log('  ✔ SWD 已进入', 'ok');
+    
+    // 尝试设置 SWD 频率为 4MHz（如果失败也继续）
+    log('设置 SWD 频率...', 'info');
+    try {
+      const freqOk = await stlink.setSWDFreq(4000000);  // 4MHz in Hz
+      if (freqOk) {
+        log('  ✔ SWD 频率已设置为 4 MHz', 'ok');
+      } else {
+        log('  ⚠ 频率设置返回非 OK，尝试默认频率', 'warn');
+      }
+    } catch(ef) {
+      log(`  ⚠ 频率设置异常，忽略: ${ef.message}`, 'warn');
+    }
+    
+    // 最小初始化延迟（DAP 通常很快响应）
+    log('等待 DAP 初始化...', 'info');
+    await new Promise(r => setTimeout(r, 300));  // 仅最小延迟
+    
+    // 多次尝试读 DAP_IDCODE（有时第一次失败）
+    log('验证 DAP 链路...', 'info');
+    let dapOk = false;
+    let dapId = 0;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const dapIdRaw = await stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.READREG, 0], 8);
+        dapId = ((dapIdRaw[3]&0xFF)<<24)|((dapIdRaw[2]&0xFF)<<16)|((dapIdRaw[1]&0xFF)<<8)|(dapIdRaw[0]&0xFF);
+        if (dapId !== 0 && dapId !== 0xFFFFFFFF) {
+          dapOk = true;
+          log(`  ✔ DAP_IDCODE = 0x${(dapId>>>0).toString(16).toUpperCase().padStart(8,'0')} (${attempt == 1 ? '首次' : `第${attempt}次`} 尝试成功)`, 'ok');
+          break;
+        } else if (attempt < 3) {
+          log(`  ℹ 尝试 ${attempt}/3: DAP 无应答，重试...`, 'warn');
+          await new Promise(r => setTimeout(r, 100));
+        }
+      } catch(ed) {
+        if (attempt < 3) {
+          log(`  ℹ 尝试 ${attempt}/3: 读取异常，重试...`, 'warn');
+          await new Promise(r => setTimeout(r, 100));
+        }
+      }
+    }
+    
+    if (!dapOk) {
+      log(`  🔴 DAP_IDCODE = 0x${(dapId>>>0).toString(16).toUpperCase().padStart(8,'0')} (3次尝试全部失败，SWD 链路故障)`, 'err');
+      log(`  💡 提示: 尝试按住目标 RESET（或硬件复位按钮）→ 立即点击"读取"→ 松开 RESET`, 'warn');
+      throw new Error(`DAP 无应答或链路故障 (IDCODE=0x${(dapId>>>0).toString(16)})`);
+    }
+
+    // Reset + Halt 目标芯片
+    log('复位并暂停目标芯片...', 'info');
+    try {
+      // 先拉低 NRST（如果硬件支持）
+      const resetSeq = [CMD.DEBUG_COMMAND, 0x00, 0x01];  // 可能是 RESET_SYS 或类似
+      try {
+        await stlink.xfer(resetSeq, 2);
+        log('  ℹ 已发送系统复位信号', 'info');
+      } catch(e) {
+        // 忽略，有些固件不支持
+      }
+      
+      await stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.RESETCORE], 2);
+      await new Promise(r => setTimeout(r, 100));
+      await stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.HALTCORE], 2);
+      await new Promise(r => setTimeout(r, 100));
+      log('  ✔ 芯片已 HALT', 'ok');
+
+      // 读 PC 寄存器验证链路（reg 15 = PC）
+      const pcRaw = await stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.READREG, 15], 8);
+      const pc = ((pcRaw[3]&0xFF)<<24)|((pcRaw[2]&0xFF)<<16)|((pcRaw[1]&0xFF)<<8)|(pcRaw[0]&0xFF);
+      log(`  ✔ PC = 0x${(pc>>>0).toString(16).toUpperCase().padStart(8,'0')} (raw: ${Array.from(pcRaw.slice(0,4)).map(x=>x.toString(16).padStart(2,'0')).join(' ')})`, 'ok');
+    } catch(eh) {
+      log(`  ⚠ HALT/读寄存器失败: ${eh.message}`, 'warn');
+    }
+
+    // 读 Core ID
+    log('读取 Core ID...', 'info');
+    try {
+      const coreId = await stlink.readCoreID();
+      log(`  ✔ Core ID = 0x${(coreId>>>0).toString(16).toUpperCase().padStart(8,'0')}`, 'ok');
+    } catch(ec) {
+      log(`  ⚠ Core ID 读取失败: ${ec.message}`, 'warn');
+    }
+
+    // 芯片识别：根据 DBGMCU_IDCODE + Flash 大小寄存器自动识别 STM32F1 vs GD32F1
+    log('识别芯片型号...', 'info');
+    
+    let chipInfo = null;
+    let dbgmcuIdcode = 0;
+    let flashSize = 0;
+    
+    try {
+      // 尝试读取 DBGMCU_IDCODE (0xE0042000) 用于区分 STM32 vs GD32
+      console.log('=== 尝试读取 DBGMCU_IDCODE 和 Flash 大小 ===');
+      dbgmcuIdcode = await stlink.readMem32(ARM_IDCODE_ADDR);
+      console.log(`DBGMCU_IDCODE = 0x${dbgmcuIdcode.toString(16).padStart(8,'0')}`);
+      console.log(`  bit[29] = ${(dbgmcuIdcode >> 29) & 1}`);
+      console.log(`  bit[11:0] (Device ID) = 0x${(dbgmcuIdcode & 0xFFF).toString(16).padStart(3,'0')}`);
+      
+      // 读取 Flash 大小寄存器 (0x1FFFF7E0) - 取低16位
+      // GD32F1/STM32F1 系列芯片 Flash 容量存储在 0x1FFFF7E0 的低16位（单位KB）
+      try {
+        const flashReg = await stlink.readMem32(0x1FFFF7E0);
+        flashSize = flashReg & 0xFFFF;  // 仅取低16位
+        console.log(`Flash 大小寄存器 (0x1FFFF7E0) = 0x${flashReg.toString(16).padStart(8,'0')}`);
+        console.log(`Flash 容量 (低16位) = 0x${flashSize.toString(16).padStart(4,'0')} = ${flashSize} KB`);
+        
+        // 合理性检查
+        if (flashSize === 0 || flashSize > 1024) {
+          console.log(`  ⚠️ Flash 容量异常 (${flashSize} KB)，将使用默认范围显示`);
+          flashSize = 0;  // 标记为无效，后续显示为默认范围
+        } else {
+          console.log(`  ✓ Flash 容量有效: ${flashSize} KB`);
+        }
+      } catch(e) {
+        console.log(`Flash 大小读取失败: ${e.message}`);
+        flashSize = 0;  // 读取失败，使用默认
+      }
+      
+      // GD32F1 vs STM32F1 识别逻辑
+      // ===== 第一优先级：JTAG ID 判断（最可靠）=====
+      const jtagId = await stlink.getJtagId();
+      
+      const deviceId = dbgmcuIdcode & 0xFFF;        // 低12位是设备ID
+      const versionCode = (dbgmcuIdcode >> 16) & 0xFFFF;  // 高16位是版本/厂商标识
+      const isBit29Set = (dbgmcuIdcode & 0x20000000) === 0x20000000;
+      
+      console.log(`Device ID = 0x${deviceId.toString(16).padStart(3,'0')}`);
+      console.log(`版本/厂商标识 (bit[31:16]) = 0x${versionCode.toString(16).padStart(4,'0')}`);
+      
+      console.log(`\n=== 芯片识别（优先级顺序）===`);
+      
+      // 🎯 方案 1：JTAG ID 最可靠，优先使用
+      if (jtagId === 0x041) {
+        console.log(`✅ JTAG ID = 0x041 → 识别为 STM32F1`);
+        chipInfo = { series: 'STM32F1', manufacturer: 'STMicroelectronics' };
+      } else if (jtagId === 0x7A3) {
+        console.log(`✅ JTAG ID = 0x7A3 → 识别为 GD32F1`);
+        chipInfo = { series: 'GD32F1', manufacturer: 'GigaDevice' };
+      } 
+      // 🎯 方案 2：JTAG ID 失效或非标准值，使用 DBGMCU_IDCODE 备选
+      else if (jtagId > 0) {
+        console.log(`⚠️ JTAG ID = 0x${jtagId.toString(16).padStart(3,'0')} (非标准)，使用 DBGMCU_IDCODE 判断`);
+
+        if ((versionCode & 0xF000) === 0x2000) {
+          console.log(`✅ 版本标识 0x2xxx → 识别为 STM32F1`);
+          chipInfo = { series: 'STM32F1', manufacturer: 'STMicroelectronics' };
+        } else {
+          console.log(`✅ 版本标识非 STM32 → 识别为 GD32F1`);
+          chipInfo = { series: 'GD32F1', manufacturer: 'GigaDevice' };
+        }
+      } 
+      // 🎯 方案 3：JTAG ID 读取失败，最后才用 bit[29] 判断
+      else {
+        console.log(`⚠️ JTAG ID 读取失败，使用 bit[29] 判断`);
+        
+        if (isBit29Set) {
+          console.log(`✅ bit[29]=1 → 识别为 GD32`);
+          chipInfo = { series: 'GD32F1', manufacturer: 'GigaDevice' };
+        } else {
+          console.log(`✅ bit[29]=0 → 识别为 STM32`);
+          chipInfo = { series: 'STM32F1', manufacturer: 'STMicroelectronics' };
+        }
+      }
+    } catch(e) {
+      console.log(`芯片识别异常: ${e.message}`);
+      chipInfo = { series: 'STM32F1/GD32F1', manufacturer: '未确定' };
+    }
+    
+    // 完整芯片信息
+    const fullChipInfo = {
+      ...chipInfo,
+      model: chipInfo.series === 'GD32F1' ? 'GD32F103 系列' : 'STM32F103 系列',
+      core: 'Cortex-M3',
+      flash: flashSize > 0 ? `${flashSize} KB` : '64KB-512KB',
+      sram: '8KB-64KB'
+    };
+    
+    // 显示识别结果
+    const idcodeDisplay = dbgmcuIdcode > 0 ? `0x${dbgmcuIdcode.toString(16).padStart(8,'0')}` : '未读取';
+    $('info-idcode').textContent = idcodeDisplay;
+    $('info-rev').textContent = fullChipInfo.manufacturer;
+    $('info-model').textContent = fullChipInfo.model;
+    $('info-core').textContent = fullChipInfo.core;
+    $('info-flash').textContent = fullChipInfo.flash;
+    $('info-sram').textContent = fullChipInfo.sram;
+    
+    log(`  ✔ 芯片系列: ${fullChipInfo.series}`, 'ok');
+    log(`  ✔ 芯片型号: ${fullChipInfo.model}`, 'ok');
+    log(`  ✔ 厂商: ${fullChipInfo.manufacturer}`, 'ok');
+    if (flashSize > 0) log(`  ✔ Flash 大小: ${flashSize} KB`, 'ok');
+
+    // Helper: 尝试多个地址，选出第一个返回非零的 UID 基址（带超时保护）
+    // 核心原则：一旦找到有效地址，立即返回，不再继续尝试
+    async function detectUidBase() {
+      const candidates = [
+        STM32_UID_F1,    // F1 系列（最可能，优先尝试）
+        STM32_UID_L0,    // L0/L1
+        STM32_UID_G0,    // G0
+        STM32_UID_BASE,  // F2/F4/F7/H7 等默认
+      ];
+      
+      for (const addr of candidates) {
+        try {
+          // 为每个读取添加超时保护（1秒）
+          const w = await Promise.race([
+            stlink.readMem32(addr),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('detectUid 超时')), 1000))
+          ]);
+          
+          // ✅ 只要读取成功且数据非全 0/全 1，立即返回，不继续尝试其他地址
+          if (w !== 0 && w !== 0xFFFFFFFF) {
+            console.log(`✓ UID 基址 0x${addr.toString(16).toUpperCase()} 有效 (值: 0x${w.toString(16).padStart(8,'0')})`);
+            return addr;  // 🎯 立即返回！
+          } else {
+            console.log(`✗ UID 基址 0x${addr.toString(16).toUpperCase()} 无效 (值: 0x${w.toString(16).padStart(8,'0')})`);
+          }
+        } catch (e) {
+          console.log(`✗ UID 基址 0x${addr.toString(16).toUpperCase()} 读取失败: ${e.message}`);
+          // 继续尝试下一个
+        }
+      }
+      
+      // 若全部失败则退回默认
+      console.log(`⚠️ 所有 UID 基址检测失败，使用默认 0x${STM32_UID_BASE.toString(16).toUpperCase()}`);
+      return STM32_UID_BASE;
+    }
+
+    // 根据 IDCODE 选择 UID 地址（加日志方便调试）
+    let uidBase = await detectUidBase();
+    log(`  ✔ 选定 UID 地址: 0x${uidBase.toString(16).toUpperCase()}`, 'ok');
+
+
+    // 读 96-bit UID
+    log('读取 96-bit UID...', 'info');
+    const [w0, w1, w2] = await stlink.readUID(uidBase);
+
+    const toHex8 = n => (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
+    const uidStr = toHex8(w0) + toHex8(w1) + toHex8(w2);
+    const uidFmt = `${toHex8(w0)}-${toHex8(w1)}-${toHex8(w2)}`;
+
+    // 显示结果 - 立即显示，不等待
+    const disp = $('chip-id-display');
+    disp.classList.remove('empty');
+    disp.textContent = uidFmt;
+
+    const bytesEl = $('uid-bytes');
+    bytesEl.innerHTML = '';
+    const bytes = [];
+    for (let i = 0; i < 12; i++) {
+      const word = [w0, w1, w2][Math.floor(i / 4)];
+      bytes.push((word >>> ((i % 4) * 8)) & 0xFF);
+    }
+    // 立即显示所有字节，不使用动画延迟
+    bytes.forEach((b) => {
+      const span = document.createElement('span');
+      span.className = 'uid-byte show';  // 直接添加 show 类
+      span.textContent = b.toString(16).toUpperCase().padStart(2, '0');
+      bytesEl.appendChild(span);
+    });
+
+    // 恢复运行（后台操作，不阻塞主流程）
+    // 数据已获取，立即进入清理阶段，RUNCORE 是可选的
+    try {
+      stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.RUNCORE], 2)
+        .then(() => log('  ✔ 芯片已恢复运行', 'ok'))
+        .catch(e => console.log(`⚠️ RUNCORE 失败但继续: ${e.message}`));
+    } catch(e) {
+      // 忽略
+    }
+
+    $('btn-copy').disabled = false;
+    $('btn-copy').onclick = () => {
+      navigator.clipboard.writeText(uidStr).then(() => log('UID 已复制到剪贴板', 'ok'));
+    };
+    $('chip-hint').textContent = `UID 地址: 0x${uidBase.toString(16).toUpperCase()}`;
+
+    log(`  UID[0] = 0x${toHex8(w0)}`, 'ok');
+    log(`  UID[1] = 0x${toHex8(w1)}`, 'ok');
+    log(`  UID[2] = 0x${toHex8(w2)}`, 'ok');
+    log(`✔ 完整 UID: ${uidFmt}`, 'ok');
+    setStatus(`已连接 · ${$('info-model').textContent}`, 'connected');
+
+  } catch(e) {
+    log(`✘ 错误：${e.message}`, 'err');
+    setStatus('读取失败 — ' + e.message.slice(0, 40), 'error');
+    log(`━━━ 问题诊断 ━━━`, 'warn');
+    log(`◆ 如果 ST-Link LED 显示红色，说明调试链路故障：`, 'warn');
+    log(`  1️⃣  检查 SWDIO/SWCLK 是否接好（电压、线序）`, 'warn');
+    log(`  2️⃣  确认目标芯片有 3.3V/1.8V 供电（VDD 脚）`, 'warn');
+    log(`  3️⃣  尝试按住目标的 RESET 按钮→点击"读取"→松开 RESET`, 'warn');
+    log(`  4️⃣  降低 SWD 频率至 125 kHz 后重试`, 'warn');
+    log(`◆ 如果 LED 显示绿色但仍读不到数据：`, 'warn');
+    log(`  • 检查浏览器控制台 (F12→Console) 的 readMem32 输出`, 'warn');
+  } finally {
+    // 清理调试连接（按当前模式智能清理）
+    try {
+      await stlink.leaveState();
+      console.log('✓ 调试连接已清理');
+    } catch(e) {
+      console.log(`ℹ️ 调试清理跳过: ${e.message}`);
+    }
+    
+    setBusy(false);
+  }
+});
+
+$('btn-clear').addEventListener('click', () => {
+  $('chip-id-display').className = 'chip-id-display empty';
+  $('chip-id-display').textContent = '-- 等待读取 --';
+  $('uid-bytes').innerHTML = '';
+  $('btn-copy').disabled = true;
+  $('chip-hint').textContent = '连接设备后点击"读取 Chip ID"';
+  ['info-model','info-core','info-flash','info-sram','info-idcode','info-rev'].forEach(id => $(id).textContent = '—');
+});
+
+$('btn-clear-log').addEventListener('click', () => { $('log').innerHTML = ''; });
+</script>
+</body>
+</html>
