@@ -645,6 +645,12 @@
         <span id="file-info" style="color:var(--dim); font-size:0.8rem; min-width:120px">未选择</span>
       </div>
     </div>
+
+    <div class="field-group" id="bin-addr-group" style="display:none">
+      <div class="field-label">BIN 烧写起始地址</div>
+      <input type="text" id="bin-base-addr" value="0x08000000" placeholder="例如: 0x08000000" style="width:100%; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:5px; color:var(--text); font-family:'Share Tech Mono', monospace; font-size:0.85rem; padding:8px 10px; outline:none; transition:border-color 0.2s;">
+      <div style="margin-top:6px; font-size:0.75rem; color:var(--dim); font-family:monospace">仅对 .bin 生效；.hex 将使用文件内地址</div>
+    </div>
     
     <div class="field-group">
       <div class="field-label">固件信息</div>
@@ -1858,8 +1864,42 @@ class HexParser {
 // ─────────────────────────────────────────
 let firmwareData = null;
 let firmwareInfo = { size: 0, format: '', segments: 0, addrRange: '' };
+let firmwareFileExt = '';
+let rawBinData = null;
+
+const parseAddress = (input) => {
+  const normalized = String(input || '').trim();
+  if (!normalized) {
+    throw new Error('BIN 起始地址不能为空');
+  }
+  const value = normalized.toLowerCase().startsWith('0x')
+    ? parseInt(normalized, 16)
+    : parseInt(normalized, 10);
+
+  if (!Number.isInteger(value) || Number.isNaN(value)) {
+    throw new Error('BIN 起始地址格式无效（请使用十六进制如 0x08000000）');
+  }
+  if (value < 0 || value > 0xFFFFFFFF) {
+    throw new Error('BIN 起始地址超出 32 位地址范围');
+  }
+  return value >>> 0;
+};
+
+const applyBinFirmwareData = () => {
+  if (!(rawBinData instanceof Uint8Array)) {
+    throw new Error('未加载 BIN 数据');
+  }
+  const baseAddr = parseAddress($('bin-base-addr').value);
+  firmwareData = {
+    segments: [{ addr: baseAddr, data: rawBinData }],
+    totalSize: rawBinData.length
+  };
+  firmwareInfo.format = 'Binary';
+};
 
 const updateFileInfo = () => {
+  $('bin-addr-group').style.display = firmwareFileExt === 'bin' ? 'block' : 'none';
+
   if (!firmwareData) {
     $('file-info').textContent = '未选择';
     $('file-stats').textContent = '-- 未加载固件 --';
@@ -1892,24 +1932,25 @@ $('file-input').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) {
     firmwareData = null;
+    rawBinData = null;
+    firmwareFileExt = '';
     updateFileInfo();
     return;
   }
   
   try {
-    const content = await file.text();
+    const lowerName = file.name.toLowerCase();
     
-    if (file.name.endsWith('.hex')) {
+    if (lowerName.endsWith('.hex')) {
+      const content = await file.text();
       firmwareData = HexParser.parse(content);
       firmwareInfo.format = 'Intel HEX';
-    } else if (file.name.endsWith('.bin')) {
-      // BIN 文件：直接作为数据，地址从 0x08000000 开始（STM32 Flash 基址）
-      const binData = new Uint8Array(await file.arrayBuffer());
-      firmwareData = {
-        segments: [{ addr: 0x08000000, data: binData }],
-        totalSize: binData.length
-      };
-      firmwareInfo.format = 'Binary';
+      firmwareFileExt = 'hex';
+      rawBinData = null;
+    } else if (lowerName.endsWith('.bin')) {
+      rawBinData = new Uint8Array(await file.arrayBuffer());
+      firmwareFileExt = 'bin';
+      applyBinFirmwareData();
     } else {
       throw new Error('不支持的文件格式（需要 .hex 或 .bin）');
     }
@@ -1919,7 +1960,23 @@ $('file-input').addEventListener('change', async (e) => {
   } catch (err) {
     log(`✗ 固件加载失败: ${err.message}`, 'err');
     firmwareData = null;
+    rawBinData = null;
+    firmwareFileExt = '';
     updateFileInfo();
+  }
+});
+
+$('bin-base-addr').addEventListener('change', () => {
+  if (firmwareFileExt !== 'bin' || !(rawBinData instanceof Uint8Array)) return;
+  try {
+    applyBinFirmwareData();
+    updateFileInfo();
+    const base = firmwareData.segments[0].addr;
+    log(`✓ BIN 起始地址已更新: 0x${base.toString(16).toUpperCase().padStart(8, '0')}`, 'ok');
+  } catch (err) {
+    firmwareData = null;
+    updateFileInfo();
+    log(`✗ BIN 起始地址无效: ${err.message}`, 'err');
   }
 });
 
@@ -1932,6 +1989,16 @@ const updateProgramProgress = (step, current, total) => {
 };
 
 $('btn-program').addEventListener('click', async () => {
+  if (firmwareFileExt === 'bin') {
+    try {
+      applyBinFirmwareData();
+      updateFileInfo();
+    } catch (err) {
+      log(`✗ BIN 起始地址检查失败: ${err.message}`, 'err');
+      return;
+    }
+  }
+
   if (!connected || !firmwareData) {
     log('✗ 未连接或未加载固件', 'err');
     return;
