@@ -1141,6 +1141,70 @@ class STLinkUSB {
     return val;
   }
 
+  async readMemBlock(addr, length) {
+    if (!this.device) {
+      throw new Error('USB 设备未连接');
+    }
+    if (this.epIn == null || this.epOut == null) {
+      throw new Error('USB 端点未就绪');
+    }
+    if (length <= 0) {
+      return new Uint8Array(0);
+    }
+
+    const alignedLen = (length + 3) & ~3;
+    if (alignedLen > 0xFFFF) {
+      throw new Error(`readMemBlock 长度过大: ${alignedLen}`);
+    }
+
+    const cmd = new Uint8Array([
+      CMD.DEBUG_COMMAND, DEBUG_CMD.READMEM_32BIT,
+      addr & 0xFF, (addr >> 8) & 0xFF, (addr >> 16) & 0xFF, (addr >> 24) & 0xFF,
+      alignedLen & 0xFF, (alignedLen >> 8) & 0xFF,
+      0, 0, 0, 0, 0, 0, 0, 0
+    ]);
+
+    try {
+      const out = await Promise.race([
+        this.device.transferOut(this.epOut, cmd),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('readMemBlock transferOut 超时')), 2000))
+      ]);
+      if (out.status !== 'ok') {
+        throw new Error(`readMemBlock transferOut 失败: ${out.status}`);
+      }
+
+      const chunks = [];
+      let received = 0;
+      while (received < alignedLen) {
+        const reqLen = Math.min(64, alignedLen - received);
+        const r = await Promise.race([
+          this.device.transferIn(this.epIn, reqLen),
+          new Promise((_, rej) => setTimeout(() => rej(new Error(`readMemBlock transferIn 超时 (received=${received}/${alignedLen})`)), 2000))
+        ]);
+
+        if (!r.data || r.data.byteLength === 0) {
+          throw new Error('readMemBlock 收到空响应');
+        }
+
+        const d = new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength);
+        chunks.push(new Uint8Array(d));
+        received += d.length;
+      }
+
+      const merged = new Uint8Array(received);
+      let offset = 0;
+      for (const c of chunks) {
+        merged.set(c, offset);
+        offset += c.length;
+      }
+      return merged;
+    } catch (e) {
+      try { await this.device.clearHalt('in', this.epIn); } catch (_) {}
+      try { await this.device.clearHalt('out', this.epOut); } catch (_) {}
+      throw e;
+    }
+  }
+
   async readDebugReg32(addr) {
     // 使用 APIV2 READDEBUGREG 读取调试/外设寄存器
     const cmd = [
@@ -2640,24 +2704,37 @@ $('btn-program').addEventListener('click', async () => {
         throw new Error('验证前无法确保目标内核处于 HALT 状态');
       }
       updateProgramProgressByStage('verify', '验证中', 0, totalSize);
+      const VERIFY_READ_CHUNK = 128;
       
       let verified = 0;
       for (let segIdx = 0; segIdx < programSegments.length; segIdx++) {
         const { addr, data } = programSegments[segIdx];
-        
-        for (let i = 0; i < data.length; i += 4) {
-          const readAddr = addr + i;
-          const readVal = await stlink.readMem32(readAddr);
-          
-          let expectedVal = 0;
-          for (let j = 0; j < 4 && i + j < data.length; j++) {
-            expectedVal |= (data[i + j] << (j * 8));
+
+        for (let segOffset = 0; segOffset < data.length; segOffset += VERIFY_READ_CHUNK) {
+          const chunkLen = Math.min(VERIFY_READ_CHUNK, data.length - segOffset);
+          const paddedLen = (chunkLen + 3) & ~3;
+          const readChunk = await stlink.readMemBlock(addr + segOffset, paddedLen);
+
+          let mismatchOffset = -1;
+          for (let j = 0; j < chunkLen; j++) {
+            if (readChunk[j] !== data[segOffset + j]) {
+              mismatchOffset = segOffset + j;
+              break;
+            }
           }
-          
-          if (readVal !== expectedVal) {
+
+          if (mismatchOffset >= 0) {
+            const wordOffset = Math.floor(mismatchOffset / 4) * 4;
+            const readAddr = addr + wordOffset;
+            const readVal = await stlink.readMem32(readAddr);
+
+            let expectedVal = 0;
+            for (let j = 0; j < 4 && wordOffset + j < data.length; j++) {
+              expectedVal |= (data[wordOffset + j] << (j * 8));
+            }
+
             let confirmedVal = readVal >>> 0;
             let recovered = false;
-
             for (let retry = 1; retry <= 2; retry++) {
               await new Promise(r => setTimeout(r, 6));
               const retryVal = await stlink.readMem32(readAddr);
@@ -2670,7 +2747,7 @@ $('btn-program').addEventListener('click', async () => {
             }
 
             if (!recovered) {
-              const repairBlockOffset = Math.floor(i / BLOCK_SIZE) * BLOCK_SIZE;
+              const repairBlockOffset = Math.floor(wordOffset / BLOCK_SIZE) * BLOCK_SIZE;
               const repairAddr = addr + repairBlockOffset;
               const repairLen = Math.min(BLOCK_SIZE, data.length - repairBlockOffset);
               const repairData = data.slice(repairBlockOffset, repairBlockOffset + repairLen);
@@ -2691,12 +2768,9 @@ $('btn-program').addEventListener('click', async () => {
               log(`✓ 已修复并通过复验: 0x${readAddr.toString(16)}`, 'ok');
             }
           }
-          
-          verified += 4;
 
-          if ((verified % 32) === 0 || verified >= totalSize) {
-            updateProgramProgressByStage('verify', '验证中', verified, totalSize);
-          }
+          verified += chunkLen;
+          updateProgramProgressByStage('verify', '验证中', verified, totalSize);
         }
       }
       
