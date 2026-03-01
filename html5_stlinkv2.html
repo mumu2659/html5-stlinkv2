@@ -1174,12 +1174,14 @@ class STLinkUSB {
       }
 
       const chunks = [];
+      const maxReadTransfer = 512;
       let received = 0;
       while (received < alignedLen) {
-        const reqLen = Math.min(64, alignedLen - received);
+        const reqLen = Math.min(maxReadTransfer, alignedLen - received);
+        const inTimeoutMs = Math.max(2000, 400 + reqLen * 8);
         const r = await Promise.race([
           this.device.transferIn(this.epIn, reqLen),
-          new Promise((_, rej) => setTimeout(() => rej(new Error(`readMemBlock transferIn 超时 (received=${received}/${alignedLen})`)), 2000))
+          new Promise((_, rej) => setTimeout(() => rej(new Error(`readMemBlock transferIn 超时 (received=${received}/${alignedLen})`)), inTimeoutMs))
         ]);
 
         if (!r.data || r.data.byteLength === 0) {
@@ -2704,9 +2706,11 @@ $('btn-program').addEventListener('click', async () => {
         throw new Error('验证前无法确保目标内核处于 HALT 状态');
       }
       updateProgramProgressByStage('verify', '验证中', 0, totalSize);
-      const VERIFY_READ_CHUNK = 128;
+      const VERIFY_READ_CHUNK = 256;
+      const VERIFY_PROGRESS_STEP = 1024;
       
       let verified = 0;
+      let verifyLastReported = 0;
       for (let segIdx = 0; segIdx < programSegments.length; segIdx++) {
         const { addr, data } = programSegments[segIdx];
 
@@ -2770,7 +2774,10 @@ $('btn-program').addEventListener('click', async () => {
           }
 
           verified += chunkLen;
-          updateProgramProgressByStage('verify', '验证中', verified, totalSize);
+          if ((verified - verifyLastReported) >= VERIFY_PROGRESS_STEP || verified >= totalSize) {
+            updateProgramProgressByStage('verify', '验证中', verified, totalSize);
+            verifyLastReported = verified;
+          }
         }
       }
       
