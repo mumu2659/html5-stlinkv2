@@ -835,6 +835,7 @@ class STLinkUSB {
     this.epOut = null;
     this.armLoaded = false;  // ARM Flash 程序是否已加载到 SRAM
     this.armWriterDisabled = false;  // 当前会话是否禁用 ARM writer（失败后固定 direct）
+    this.armWriterStaticRegsReady = false;  // ARM writer 常量寄存器（R4/R5/R6）是否已配置
     this.programmingProfile = {
       firmwareSizeBytes: 0,
       chipFlashKB: 0,
@@ -1384,7 +1385,7 @@ class STLinkUSB {
     // 等待 ARM 程序在断点处停下（轮询 DHCSR.S_HALT 更可靠）
     const DHCSR = 0xE000EDF0;
     const startTime = Date.now();
-    const pollInterval = 50;
+    const pollInterval = 10;
     
     while (Date.now() - startTime < maxWaitMs) {
       try {
@@ -1769,18 +1770,23 @@ class STLinkUSB {
       
       // 2. 数据写入到 SRAM 数据区 (0x20000100)
       await this.writeMem8(0x20000100, blockData);
+
+      // 常量寄存器仅在会话首次配置，避免每块重复 USB 往返
+      if (!this.armWriterStaticRegsReady) {
+        await this.setReg(4, 0x4002200C);           // R4: FLASH_SR
+        await this.setReg(5, 0x00000001);           // R5: BSY bit
+        await this.setReg(6, 0x00000020);           // R6: EOP bit
+        this.armWriterStaticRegsReady = true;
+      }
       
       // 3. 设置 ARM 寄存器参数：
       //    R0 = 源地址 (0x20000100 - SRAM 数据)
       //    R1 = 目标地址 (Flash 地址)
       //    R2 = 字节数（算法内部每次减2）
-      //    R4 = FLASH_SR, R5 = BSY bit, R6 = EOP bit
+      //    R4 = FLASH_SR, R5 = BSY bit, R6 = EOP bit（会话首次已预置）
       await this.setReg(0, 0x20000100);           // R0: 数据源
       await this.setReg(1, baseAddr);             // R1: Flash 目标地址
       await this.setReg(2, blockData.length);     // R2: 字节数
-      await this.setReg(4, 0x4002200C);           // R4: FLASH_SR
-      await this.setReg(5, 0x00000001);           // R5: BSY bit
-      await this.setReg(6, 0x00000020);           // R6: EOP bit
       await this.setReg(15, 0x20000001);          // PC: SRAM 写入器入口（Thumb）
 
       // 运行算法前预置 PG 位
@@ -2418,7 +2424,7 @@ $('btn-program').addEventListener('click', async () => {
     // 清理旧状态
     log('清理设备状态...', 'info');
     await stlink.leaveState();
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 120));
     
     // 进入调试模式
     log('进入 SWD 调试模式...', 'info');
@@ -2427,7 +2433,7 @@ $('btn-program').addEventListener('click', async () => {
     // SWD 频率：固定 4MHz
     log('设置 SWD 频率...', 'info');
     await stlink.setSWDFreq(4000000);  // 4MHz
-    await new Promise(r => setTimeout(r, 300));
+    await new Promise(r => setTimeout(r, 80));
     
     // OpenOCD 预热策略：USB 通信热启动
     log('预热 USB 和 SWD 通信...', 'info');
@@ -2444,12 +2450,12 @@ $('btn-program').addEventListener('click', async () => {
         } catch (e) {
           console.warn(`USB 预热 #${warmup+1} 失败，重试...`);
         }
-        await new Promise(r => setTimeout(r, 50));
+        await new Promise(r => setTimeout(r, 20));
       }
     } catch (e) {
       console.warn(`USB 预热异常: ${e.message}`);
     }
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, 50));
     
     // Halt 芯片并验证
     log('暂停目标芯片...', 'info');
@@ -2457,12 +2463,12 @@ $('btn-program').addEventListener('click', async () => {
     if (!halted) {
       throw new Error('目标内核未进入 HALT 状态');
     }
-    await new Promise(r => setTimeout(r, 200));
+    await new Promise(r => setTimeout(r, 50));
     
     // 清除 Flash 错误状态
     log('清除 Flash 错误状态...', 'info');
     await stlink.clearFlashError();
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 80));
     
     // 解锁 Flash
     log('解锁 Flash 存储器...', 'info');
@@ -2474,7 +2480,7 @@ $('btn-program').addEventListener('click', async () => {
       );
       throw new Error('Flash 解锁失败，可能是硬件问题或芯片未连接');
     }
-    await new Promise(r => setTimeout(r, 100));
+    await new Promise(r => setTimeout(r, 20));
     
     const { segments } = firmwareData;
 
@@ -2522,6 +2528,7 @@ $('btn-program').addEventListener('click', async () => {
     });
     stlink.armLoaded = false;
     stlink.armWriterDisabled = false;
+    stlink.armWriterStaticRegsReady = false;
     log(`写入模式: ${PROGRAM_WRITE_MODE === 'arm_only' ? 'ARM-only（不回退）' : 'ARM优先（失败回退direct）'}`, PROGRAM_WRITE_MODE === 'arm_only' ? 'warn' : 'info');
     log(
       `编程超时策略: FW ${(totalSize / 1024).toFixed(1)}KB, Chip ${profile.chipFlashKB || '未知'}KB, write状态 ${profile.writeMem8StatusTimeoutMs}ms, BKPT ${profile.waitForBreakpointMs}ms, 重试 ${profile.writeMem8RetryCount} 次`,
@@ -2578,7 +2585,7 @@ $('btn-program').addEventListener('click', async () => {
     log('擦除后清理 Flash 错误状态...', 'info');
     await stlink.clearFlashError();
     
-    await new Promise(r => setTimeout(r, 100));
+    await new Promise(r => setTimeout(r, 20));
     
     // 编程每个段
     log('开始写入数据 (使用块优化)...', 'info');
