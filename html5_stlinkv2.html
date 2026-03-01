@@ -250,6 +250,7 @@
     outline: none;
     transition: border-color 0.2s;
     -webkit-appearance: none;
+    appearance: none;
   }
   select:focus, input[type="number"]:focus { border-color: var(--accent); }
 
@@ -576,6 +577,18 @@
       <button class="btn btn-primary" style="width:auto" onclick="closeModal(); triggerReconnect()">
         ↺ &nbsp;重新连接
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- 必备条件不满足阻断弹窗 -->
+<div class="modal-overlay" id="modal-required">
+  <div class="modal">
+    <div class="modal-icon">⚠️</div>
+    <div class="modal-title" id="modal-required-title">运行条件不满足</div>
+    <div class="modal-desc" id="modal-required-desc"></div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" style="width:auto" onclick="closeRequiredModal()">我知道了</button>
     </div>
   </div>
 </div>
@@ -1953,10 +1966,91 @@ const setBusy = (on) => {
   $('btn-read').disabled = on || !connected;
 };
 
-// WebUSB 检测
-if (!navigator.usb) {
+const REQUIRED_MODAL_COPY = {
+  runtimeTitle: '运行条件不满足',
+  runtimeLead: '未通过最小必备条件，已阻断操作。',
+  runtimeActions: [
+    '使用 Chrome/Edge（桌面版）打开页面',
+    '确认地址为 HTTPS 或 localhost',
+    '重新打开页面后再连接设备',
+  ],
+  endpointTitle: '端点未就绪',
+  endpointLead: '设备已连接但端点不完整（必须同时具备 IN/OUT 端点），已阻断后续流程。',
+  endpointActions: [
+    '关闭 CubeProgrammer / IDE / st-flash 等占用工具',
+    '物理拔插 ST-Link',
+    '回到页面点击“连接设备”重试',
+  ],
+  flashUnlockTitle: 'Flash 未解锁',
+  flashUnlockLead: 'Flash 解锁失败，已阻断编程。',
+  flashUnlockActions: [
+    '目标板供电正常',
+    '目标电压不低于 2.0V',
+    'SWD 接线与连接状态正常',
+    '断开占用工具后重新连接再试',
+  ],
+};
+
+function buildRequiredModalHtml(leadText, actions = [], prefixTitle = '处理建议') {
+  const body = [leadText];
+  if (actions.length > 0) {
+    body.push(`<br><br>${prefixTitle}：<br>` + actions.map((s, i) => `${i + 1}. ${s}`).join('<br>'));
+  }
+  return body.join('');
+}
+
+function showRequiredModal(title, htmlText) {
+  const titleEl = document.getElementById('modal-required-title');
+  const descEl = document.getElementById('modal-required-desc');
+  if (titleEl) titleEl.textContent = title || '运行条件不满足';
+  if (descEl) descEl.innerHTML = htmlText || '请按提示处理后重试。';
+  document.getElementById('modal-required').classList.add('show');
+}
+
+function closeRequiredModal() {
+  document.getElementById('modal-required').classList.remove('show');
+}
+
+function getRequirementFailures() {
+  const failures = [];
+  if (!window.isSecureContext) {
+    failures.push('页面不在安全上下文（需要 HTTPS 或 localhost）。');
+  }
+  if (!navigator.usb) {
+    failures.push('浏览器不支持 WebUSB。');
+  }
+  return failures;
+}
+
+function applyRequirementBlockUI(failures) {
+  $('btn-connect').disabled = true;
+  $('btn-read').disabled = true;
+  $('btn-program').disabled = true;
   $('not-supported').style.display = 'block';
-  log('WebUSB API 不可用，请使用 Chrome/Edge 桌面版', 'err');
+  $('not-supported').textContent = `⚠ ${failures.join(' ')}`;
+  setStatus('运行条件不满足', 'error');
+}
+
+function checkRuntimeRequirements({ showModal = false } = {}) {
+  const failures = getRequirementFailures();
+  if (failures.length === 0) return true;
+
+  applyRequirementBlockUI(failures);
+  failures.forEach(msg => log(`✗ 必备条件失败: ${msg}`, 'err'));
+  if (showModal) {
+    const failureListHtml = failures.map((s, i) => `${i + 1}. ${s}`).join('<br>');
+    const actionListHtml = REQUIRED_MODAL_COPY.runtimeActions.map((s, i) => `${i + 1}. ${s}`).join('<br>');
+    showRequiredModal(
+      REQUIRED_MODAL_COPY.runtimeTitle,
+      `${REQUIRED_MODAL_COPY.runtimeLead}<br><br>${failureListHtml}<br><br>处理建议：<br>${actionListHtml}`
+    );
+  }
+  return false;
+}
+
+// WebUSB 检测
+if (!checkRuntimeRequirements({ showModal: true })) {
+  log('运行环境不满足最小要求，连接/编程已阻断', 'err');
 } else {
   log('WebUSB API 就绪，请连接 ST-Link 设备', 'info');
 }
@@ -1981,6 +2075,9 @@ function triggerReconnect() {
   // 短暂延迟，给用户时间完成拔插
   setTimeout(() => document.getElementById('btn-connect').click(), 300);
 }
+document.getElementById('modal-required').addEventListener('click', function(e) {
+  if (e.target === this) closeRequiredModal();
+});
 // 点击遮罩关闭
 document.getElementById('modal-conflict').addEventListener('click', function(e) {
   if (e.target === this) closeModal();
@@ -2282,6 +2379,10 @@ const updateProgramProgressByStage = (stage, step, current, total, detailText = 
 };
 
 $('btn-program').addEventListener('click', async () => {
+  if (!checkRuntimeRequirements({ showModal: true })) {
+    return;
+  }
+
   if (firmwareFileExt === 'bin') {
     try {
       applyBinFirmwareData();
@@ -2367,6 +2468,10 @@ $('btn-program').addEventListener('click', async () => {
     log('解锁 Flash 存储器...', 'info');
     const unlocked = await stlink.flashUnlock();
     if (!unlocked) {
+      showRequiredModal(
+        REQUIRED_MODAL_COPY.flashUnlockTitle,
+        buildRequiredModalHtml(REQUIRED_MODAL_COPY.flashUnlockLead, REQUIRED_MODAL_COPY.flashUnlockActions, '请按顺序检查')
+      );
       throw new Error('Flash 解锁失败，可能是硬件问题或芯片未连接');
     }
     await new Promise(r => setTimeout(r, 100));
@@ -2696,7 +2801,7 @@ $('btn-program').addEventListener('click', async () => {
 });
 
 $('btn-connect').addEventListener('click', async () => {
-  if (!navigator.usb) return;
+  if (!checkRuntimeRequirements({ showModal: true })) return;
   try {
     setStatus('正在连接...', 'busy');
     log('━━━ 开始连接诊断 ━━━', 'info');
@@ -2788,6 +2893,19 @@ $('btn-connect').addEventListener('click', async () => {
     }
     const inEps  = epList.filter(e => e.direction === 'in').sort((a,b) => a.endpointNumber - b.endpointNumber);
     const outEps = epList.filter(e => e.direction === 'out').sort((a,b) => a.endpointNumber - b.endpointNumber);
+
+    if (inEps.length === 0 || outEps.length === 0) {
+      log('  ✘ 端点未就绪：缺少 IN 或 OUT 端点', 'err');
+      setStatus('连接失败 (端点未就绪)', 'error');
+      showRequiredModal(
+        REQUIRED_MODAL_COPY.endpointTitle,
+        buildRequiredModalHtml(REQUIRED_MODAL_COPY.endpointLead, REQUIRED_MODAL_COPY.endpointActions)
+      );
+      try { await device.releaseInterface(0); } catch(_) {}
+      try { await device.close(); } catch(_) {}
+      return;
+    }
+
     stlink.epIn  = inEps[0].endpointNumber;
     stlink.epOut = outEps[0].endpointNumber;
     log(`  ✔ 使用端点: IN=ep${stlink.epIn} OUT=ep${stlink.epOut}`, 'ok');
