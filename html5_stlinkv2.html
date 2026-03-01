@@ -2303,12 +2303,16 @@ $('btn-program').addEventListener('click', async () => {
   programProgressStartTs = Date.now();
   $('progress-eta').textContent = 'ETA --';
   updateProgramProgress('准备中', 0, 1);
+
+  const verifyEnabled = $('opt-verify').checked;
+  let verifyPassed = !verifyEnabled;
   
   
   try {
     log('────────────────────────────', 'info');
     log('开始固件编程...', 'info');
     log('────────────────────────────', 'info');
+    log(`重启策略: ${verifyEnabled ? '校验通过后重启' : '未启用校验，完成后直接运行'}`, 'info');
     
     // 清理旧状态
     log('清理设备状态...', 'info');
@@ -2516,7 +2520,7 @@ $('btn-program').addEventListener('click', async () => {
     log(`✓ 数据写入完成 (总计 ${totalSize} 字节)`, 'ok');
     
     // 可选：验证
-    if ($('opt-verify').checked) {
+    if (verifyEnabled) {
       log('验证编程数据...', 'info');
       log('验证前确认内核暂停...', 'info');
       const verifyHalted = await stlink.haltCoreAndCheck(1200);
@@ -2585,20 +2589,73 @@ $('btn-program').addEventListener('click', async () => {
       }
       
       log(`✓ 验证成功 (${totalSize} 字节)`, 'ok');
+      verifyPassed = true;
+    }
+
+    if (verifyEnabled && verifyPassed) {
+      log('校验通过，重启目标芯片...', 'info');
+      let rebootOk = false;
+      try {
+        // 路径1：系统复位请求（更接近真实上电重启）
+        const AIRCR = 0xE000ED0C;
+        const SYSRESETREQ = 0x05FA0004;
+        const sysResetReqOk = await stlink.writeDebugReg32(AIRCR, SYSRESETREQ);
+
+        if (sysResetReqOk) {
+          log('  ↳ 已发送系统复位请求 (AIRCR.SYSRESETREQ)', 'info');
+          await new Promise(r => setTimeout(r, 160));
+          await Promise.race([
+            stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.RUNCORE], 2),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('RUNCORE 超时')), 2000))
+          ]);
+          rebootOk = true;
+        }
+      } catch (e) {
+        log(`⚠ 系统复位路径失败: ${e.message}`, 'warn');
+      }
+
+      if (!rebootOk) {
+        try {
+          // 路径2：ST-Link RESETCORE 兜底
+          await Promise.race([
+            stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.RESETCORE], 2),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('RESETCORE 超时')), 2000))
+          ]);
+          await new Promise(r => setTimeout(r, 120));
+          await Promise.race([
+            stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.RUNCORE], 2),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('RUNCORE 超时')), 2000))
+          ]);
+          rebootOk = true;
+          log('  ↳ 已执行 RESETCORE 重启路径', 'info');
+        } catch (e) {
+          log(`⚠ RESETCORE 重启路径失败: ${e.message}`, 'warn');
+        }
+      }
+
+      if (rebootOk) {
+        log('✓ 校验后已重启并运行目标程序', 'ok');
+      } else {
+        log('✗ 校验后重启未成功（已尝试系统复位和 RESETCORE）', 'err');
+      }
+    } else if (verifyEnabled && !verifyPassed) {
+      log('⚠ 未满足“校验通过”条件，跳过自动重启', 'warn');
     }
 
     updateProgramProgress('完成', 1, 1);
 
     // 运行芯片
-    log('启动目标芯片...', 'info');
-    try {
-      await Promise.race([
-        stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.RUNCORE], 2),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('RUNCORE 超时')), 2000))
-      ]);
-      await new Promise(r => setTimeout(r, 500));
-    } catch (e) {
-      console.warn(`⚠️ RUNCORE 失败但继续: ${e.message}`);
+    if (!verifyEnabled) {
+      log('启动目标芯片...', 'info');
+      try {
+        await Promise.race([
+          stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.RUNCORE], 2),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('RUNCORE 超时')), 2000))
+        ]);
+        await new Promise(r => setTimeout(r, 500));
+      } catch (e) {
+        console.warn(`⚠️ RUNCORE 失败但继续: ${e.message}`);
+      }
     }
     
     log('────────────────────────────', 'ok');
