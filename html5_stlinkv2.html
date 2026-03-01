@@ -347,6 +347,51 @@
     100% { transform: translateX(300%); }
   }
 
+  .program-progress-track {
+    background: var(--border);
+    border-radius: 6px;
+    height: 8px;
+    overflow: hidden;
+  }
+  #progress-bar-program {
+    width: 0%;
+    height: 100%;
+    position: relative;
+    background: linear-gradient(90deg, var(--accent), rgba(0,229,255,0.65));
+    box-shadow: 0 0 10px rgba(0,229,255,0.35);
+    transition: width 0.22s ease;
+  }
+  #progress-bar-program::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(
+      -45deg,
+      rgba(255,255,255,0.18) 0 8px,
+      rgba(255,255,255,0.03) 8px 16px
+    );
+    animation: progress-stripes 0.9s linear infinite;
+    mix-blend-mode: screen;
+  }
+  #progress-bar-program.done {
+    background: linear-gradient(90deg, var(--green), rgba(0,255,157,0.55));
+    box-shadow: 0 0 10px rgba(0,255,157,0.35);
+  }
+  #progress-bar-program.error {
+    background: linear-gradient(90deg, var(--accent2), rgba(255,64,129,0.55));
+    box-shadow: 0 0 10px rgba(255,64,129,0.35);
+  }
+  #progress-percent {
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--accent);
+    min-width: 46px;
+    text-align: right;
+  }
+  @keyframes progress-stripes {
+    from { background-position: 0 0; }
+    to { background-position: 24px 0; }
+  }
+
   .uid-bytes {
     display: flex;
     gap: 6px;
@@ -584,8 +629,8 @@
     <div class="field-group">
       <div class="field-label">SWD 频率 (kHz)</div>
       <select id="sel-freq">
-        <option value="4000">4000</option>
-        <option value="1800" selected>1800</option>
+        <option value="4000" selected>4000</option>
+        <option value="1800">1800</option>
         <option value="900">900</option>
         <option value="400">400</option>
         <option value="125">125</option>
@@ -681,10 +726,13 @@
     <div class="progress-section" id="progress-program" style="display:none; margin-top:16px">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
         <span id="progress-step">准备中...</span>
-        <span id="progress-percent">0%</span>
+        <div style="display:flex; gap:10px; align-items:center">
+          <span id="progress-eta" style="font-family:'Share Tech Mono', monospace; color:var(--dim); font-size:0.78rem; min-width:86px; text-align:right">ETA --</span>
+          <span id="progress-percent">0%</span>
+        </div>
       </div>
-      <div class="progress-bar-wrap" style="background:var(--border); border-radius:6px; height:6px; overflow:hidden">
-        <div class="progress-bar" id="progress-bar-program" style="width:0%; transition:width 0.2s; height:100%; background:var(--accent)"></div>
+      <div class="program-progress-track">
+        <div class="progress-bar" id="progress-bar-program"></div>
       </div>
       <div id="progress-detail" style="font-size:0.75rem; color:var(--dim); margin-top:6px; font-family:monospace">0 / 0 bytes</div>
     </div>
@@ -756,8 +804,8 @@ const ARM_IDCODE_ADDR = 0xE0042000;
 
 // SWD 频率映射（APIv2）
 const SWD_FREQ_MAP = [
-  [4000000, 0],
-  [1800000, 1],  // 默认
+  [4000000, 0],  // 默认
+  [1800000, 1],
   [1200000, 2],
   [950000, 3],
   [480000, 4],
@@ -765,12 +813,59 @@ const SWD_FREQ_MAP = [
   [125000, 6],
 ];
 
+const PROGRAM_WRITE_MODE = 'arm_only'; // 'arm_only' | 'hybrid'
+
 class STLinkUSB {
   constructor() {
     this.device = null;
     this.epIn = null;
     this.epOut = null;
     this.armLoaded = false;  // ARM Flash 程序是否已加载到 SRAM
+    this.armWriterDisabled = false;  // 当前会话是否禁用 ARM writer（失败后固定 direct）
+    this.programmingProfile = {
+      firmwareSizeBytes: 0,
+      chipFlashKB: 0,
+      writeMem8StatusTimeoutMs: 500,
+      writeMem8RetryCount: 1,
+      waitForBreakpointMs: 5000,
+    };
+  }
+
+  clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v));
+  }
+
+  configureProgrammingProfile({ firmwareSizeBytes = 0, chipFlashKB = 0 } = {}) {
+    const fwBytes = Number.isFinite(firmwareSizeBytes) ? Math.max(0, firmwareSizeBytes) : 0;
+    const fwKB = Math.max(1, Math.ceil(fwBytes / 1024));
+    const chipKB = Number.isFinite(chipFlashKB) && chipFlashKB > 0 ? chipFlashKB : 128;
+
+    const usageRatio = this.clamp(fwKB / chipKB, 0, 1.0);
+    const sizeFactor = this.clamp(fwKB / 96, 0, 2.5);
+
+    const writeMem8StatusTimeoutMs = this.clamp(
+      Math.round(300 + usageRatio * 260 + sizeFactor * 180),
+      320,
+      1500
+    );
+
+    const waitForBreakpointMs = this.clamp(
+      Math.round(2800 + usageRatio * 2600 + sizeFactor * 1600),
+      3200,
+      12000
+    );
+
+    const writeMem8RetryCount = fwKB >= 256 ? 3 : (fwKB >= 96 ? 2 : 1);
+
+    this.programmingProfile = {
+      firmwareSizeBytes: fwBytes,
+      chipFlashKB: chipFlashKB > 0 ? chipFlashKB : 0,
+      writeMem8StatusTimeoutMs,
+      writeMem8RetryCount,
+      waitForBreakpointMs,
+    };
+
+    return { ...this.programmingProfile };
   }
 
   async connect() {
@@ -1133,34 +1228,54 @@ class STLinkUSB {
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
       ]);
       
-      try {
-        let outResult = await this.device.transferOut(this.epOut, cmd);
-        if (outResult.status !== 'ok') throw new Error(`WriteMem8 Cmd transferOut failed: ${outResult.status}`);
+      const statusTimeoutMs = this.programmingProfile.writeMem8StatusTimeoutMs || 500;
+      const maxAttempts = this.programmingProfile.writeMem8RetryCount || 1;
+      let lastErr = null;
+      let chunkOk = false;
 
-        outResult = await this.device.transferOut(this.epOut, chunk);
-        if (outResult.status !== 'ok') throw new Error(`WriteMem8 Payload transferOut failed: ${outResult.status}`);
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          let outResult = await this.device.transferOut(this.epOut, cmd);
+          if (outResult.status !== 'ok') throw new Error(`WriteMem8 Cmd transferOut failed: ${outResult.status}`);
 
-        outResult = await this.device.transferOut(this.epOut, getRwStatusCmd);
-        if (outResult.status !== 'ok') throw new Error(`WriteMem8 GetStatus transferOut failed: ${outResult.status}`);
+          outResult = await this.device.transferOut(this.epOut, chunk);
+          if (outResult.status !== 'ok') throw new Error(`WriteMem8 Payload transferOut failed: ${outResult.status}`);
 
-        const r = await Promise.race([
-          this.device.transferIn(this.epIn, 2),
-          new Promise((_, rej) => setTimeout(() => rej(new Error(`writeMem8(0x${(addr + offset).toString(16)}): transferIn 超时`)), 500))
-        ]);
+          outResult = await this.device.transferOut(this.epOut, getRwStatusCmd);
+          if (outResult.status !== 'ok') throw new Error(`WriteMem8 GetStatus transferOut failed: ${outResult.status}`);
 
-        if (!r.data || r.data.byteLength === 0) {
-          throw new Error(`writeMem8(0x${(addr + offset).toString(16)}): 未收到状态响应`);
+          const r = await Promise.race([
+            this.device.transferIn(this.epIn, 2),
+            new Promise((_, rej) => setTimeout(() => rej(new Error(`writeMem8(0x${(addr + offset).toString(16)}): transferIn 超时 (${statusTimeoutMs}ms)`)), statusTimeoutMs))
+          ]);
+
+          if (!r.data || r.data.byteLength === 0) {
+            throw new Error(`writeMem8(0x${(addr + offset).toString(16)}): 未收到状态响应`);
+          }
+
+          const statusData = new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength);
+          const ok = statusData[0] === STLINK_STATUS_OK || statusData[0] === 0x80;
+          if (!ok) {
+            console.warn(`writeMem8(0x${(addr + offset).toString(16)}): ERR 0x${statusData[0].toString(16).padStart(2,'0')}`);
+            return false;
+          }
+
+          chunkOk = true;
+          break;
+        } catch (e) {
+          lastErr = e;
+          if (attempt < maxAttempts) {
+            console.warn(`writeMem8(0x${(addr + offset).toString(16)}): 第 ${attempt} 次失败，重试... (${e.message})`);
+            try { await this.device.clearHalt('in', this.epIn); } catch (_) {}
+            try { await this.device.clearHalt('out', this.epOut); } catch (_) {}
+            await new Promise(r => setTimeout(r, 10));
+          }
         }
+      }
 
-        const statusData = new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength);
-        const ok = statusData[0] === STLINK_STATUS_OK || statusData[0] === 0x80;
-        if (!ok) {
-          console.warn(`writeMem8(0x${(addr + offset).toString(16)}): ERR 0x${statusData[0].toString(16).padStart(2,'0')}`);
-          return false;
-        }
-      } catch (e) {
-        console.error(`writeMem8(0x${(addr + offset).toString(16)}): ${e.message}`);
-        throw e;
+      if (!chunkOk && lastErr) {
+        console.error(`writeMem8(0x${(addr + offset).toString(16)}): ${lastErr.message}`);
+        throw lastErr;
       }
     }
     return true;
@@ -1260,7 +1375,16 @@ class STLinkUSB {
     
     while (Date.now() - startTime < maxWaitMs) {
       try {
-        const dhcsr = await this.readDebugReg32(DHCSR);
+        // 优先使用 readMem32，实测在部分 ST-Link 固件上对 DHCSR 更稳定
+        let dhcsr = await this.readMem32(DHCSR);
+
+        // 兜底：若读值异常，再尝试 READDEBUGREG 路径
+        if (dhcsr === 0 || dhcsr === 0xFFFFFFFF) {
+          try {
+            dhcsr = await this.readDebugReg32(DHCSR);
+          } catch (_) {}
+        }
+
         if ((dhcsr & 0x00080000) !== 0) {
           throw new Error(`Flash algorithm crashed (DHCSR=0x${dhcsr.toString(16)})`);
         }
@@ -1479,6 +1603,9 @@ class STLinkUSB {
     const FLASH_CR = 0x40022010;
     const FLASH_AR = 0x40022014;
     const FLASH_SR = 0x4002200C;
+    const FLASH_SR_BSY = 0x01;
+    const FLASH_SR_PGERR_WRPRTERR = 0x14;
+    const FLASH_SR_EOP = 0x20;
     
     try {
       // Step 1: Set PER (Page Erase) bit
@@ -1496,12 +1623,28 @@ class STLinkUSB {
       // Step 4: Wait for completion (poll BSY bit) - 最多 5 秒
       const startTime = Date.now();
       const maxWait = 5000;
+      let sr = 0;
+      let done = false;
       while (Date.now() - startTime < maxWait) {
-        const sr = await this.readDebugReg32(FLASH_SR);
-        if ((sr & 0x01) === 0) {  // BSY clear
+        sr = await this.readDebugReg32(FLASH_SR);
+        if ((sr & FLASH_SR_BSY) === 0) {  // BSY clear
+          done = true;
           break;
         }
         await new Promise(r => setTimeout(r, 5));
+      }
+
+      if (!done) {
+        throw new Error(`页擦除超时 (SR=0x${sr.toString(16)})`);
+      }
+
+      if ((sr & FLASH_SR_PGERR_WRPRTERR) !== 0) {
+        await this.writeDebugReg32(FLASH_SR, sr | FLASH_SR_PGERR_WRPRTERR).catch(() => {});
+        throw new Error(`页擦除状态异常 SR=0x${sr.toString(16)}`);
+      }
+
+      if ((sr & FLASH_SR_EOP) !== 0) {
+        await this.writeDebugReg32(FLASH_SR, FLASH_SR_EOP).catch(() => {});
       }
       
       // Step 5: Clear PER bit
@@ -1512,6 +1655,21 @@ class STLinkUSB {
       return true;
     } catch (e) {
       console.warn(`页擦除失败 (0x${pageAddr.toString(16)}): ${e.message}`);
+      return false;
+    }
+  }
+
+  async recoverFlashProgrammingState() {
+    try {
+      await this.haltCoreAndCheck(1500).catch(() => false);
+      await this.clearFlashError().catch(() => {});
+      const unlocked = await this.flashUnlock().catch(() => false);
+      if (!unlocked) {
+        console.warn('恢复流程：Flash 解锁失败');
+      }
+      return unlocked;
+    } catch (e) {
+      console.warn(`恢复流程失败: ${e.message}`);
       return false;
     }
   }
@@ -1566,6 +1724,16 @@ class STLinkUSB {
     let blockData = dataArray.slice(offset, offset + length);
     if (blockData.length === 0) return true;
 
+    const armOnly = PROGRAM_WRITE_MODE === 'arm_only';
+
+    // 一旦 ARM writer 在本次会话中出现超时/异常，后续固定 direct，避免来回切换
+    if (this.armWriterDisabled) {
+      if (armOnly) {
+        throw new Error('ARM writer 已禁用（ARM-only 模式下不允许回退 direct）');
+      }
+      return await this.flashBlockDirect(baseAddr, blockData);
+    }
+
     // Flash writer 使用 halfword 写入，保证偶数字节长度
     if ((blockData.length & 1) !== 0) {
       const padded = new Uint8Array(blockData.length + 1);
@@ -1609,16 +1777,46 @@ class STLinkUSB {
       // 4. 执行 ARM 程序
       await this.core_run();
       
-      // 5. 等待 BKPT 信号（超时 5 秒）
-      if (!await this.waitForBreakpoint(5000)) {
-        console.warn(`块写入超时 (0x${baseAddr.toString(16)})，回退到 direct 编程...`);
+      // 5. 等待 BKPT 信号（超时按固件大小动态调整）
+      const waitTimeoutMs = this.programmingProfile.waitForBreakpointMs || 5000;
+      if (!await this.waitForBreakpoint(waitTimeoutMs)) {
+        try {
+          const dhcsrNow = await this.readMem32(0xE000EDF0);
+          const pcRaw = await this.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.READREG, 15], 8, 1200, true, true);
+          const pcNow = ((pcRaw[3] & 0xFF) << 24) | ((pcRaw[2] & 0xFF) << 16) | ((pcRaw[1] & 0xFF) << 8) | (pcRaw[0] & 0xFF);
+          console.warn(`ARM 超时诊断: DHCSR=0x${(dhcsrNow >>> 0).toString(16).padStart(8,'0')} PC=0x${(pcNow >>> 0).toString(16).padStart(8,'0')}`);
+        } catch (diagErr) {
+          console.warn(`ARM 超时诊断读取失败: ${diagErr.message}`);
+        }
+
+        if (armOnly) {
+          console.warn(`块写入超时(${waitTimeoutMs}ms) (0x${baseAddr.toString(16)})，ARM-only 模式下将直接报错终止`);
+        } else {
+          console.warn(`块写入超时(${waitTimeoutMs}ms) (0x${baseAddr.toString(16)})，回退到 direct 编程...`);
+        }
+        this.armWriterDisabled = true;
+        if (armOnly) {
+          throw new Error(`ARM writer BKPT 超时 (${waitTimeoutMs}ms) @0x${baseAddr.toString(16)}`);
+        }
+        console.warn('ARM writer 已禁用：本次编程剩余块将使用 direct 模式');
+        await this.recoverFlashProgrammingState();
         return await this.flashBlockDirect(baseAddr, blockData);
       }
       
       return true;
       
     } catch (e) {
-      console.warn(`块写入失败 (0x${baseAddr.toString(16)}): ${e.message}，回退到 direct 编程...`);
+      if (armOnly) {
+        console.warn(`块写入失败 (0x${baseAddr.toString(16)}): ${e.message}（ARM-only 模式，不回退）`);
+      } else {
+        console.warn(`块写入失败 (0x${baseAddr.toString(16)}): ${e.message}，回退到 direct 编程...`);
+      }
+      this.armWriterDisabled = true;
+      if (armOnly) {
+        throw e;
+      }
+      console.warn('ARM writer 已禁用：本次编程剩余块将使用 direct 模式');
+      await this.recoverFlashProgrammingState();
       return await this.flashBlockDirect(baseAddr, blockData);
     }
   }
@@ -1866,6 +2064,11 @@ let firmwareData = null;
 let firmwareInfo = { size: 0, format: '', segments: 0, addrRange: '' };
 let firmwareFileExt = '';
 let rawBinData = null;
+let programProgressStartTs = 0;
+let detectedFlashSizeKB = 0;
+
+const FLASH_BASE_ADDR = 0x08000000;
+const DEFAULT_FLASH_SIZE_KB = 512;
 
 const parseAddress = (input) => {
   const normalized = String(input || '').trim();
@@ -1928,6 +2131,40 @@ const updateFileInfo = () => {
   $('btn-program').disabled = !connected;
 };
 
+const resetChipInfoPanel = () => {
+  detectedFlashSizeKB = 0;
+  $('chip-id-display').className = 'chip-id-display empty';
+  $('chip-id-display').textContent = '-- 等待读取 --';
+  $('uid-bytes').innerHTML = '';
+  $('btn-copy').disabled = true;
+  $('chip-hint').textContent = '连接设备后点击"读取 Chip ID"';
+  ['info-model','info-core','info-flash','info-sram','info-idcode','info-rev'].forEach(id => $(id).textContent = '—');
+};
+
+const resetProgramProgressUI = () => {
+  programProgressStartTs = 0;
+  $('progress-program').style.display = 'none';
+  const bar = $('progress-bar-program');
+  bar.classList.remove('done', 'error');
+  bar.style.width = '0%';
+  $('progress-step').textContent = '--';
+  $('progress-percent').textContent = '0%';
+  $('progress-detail').textContent = '--';
+  $('progress-eta').textContent = 'ETA --';
+};
+
+const resetFirmwareUI = ({ clearFileInput = false } = {}) => {
+  firmwareData = null;
+  firmwareFileExt = '';
+  rawBinData = null;
+  firmwareInfo = { size: 0, format: '', segments: 0, addrRange: '' };
+  if (clearFileInput) {
+    $('file-input').value = '';
+  }
+  updateFileInfo();
+  resetProgramProgressUI();
+};
+
 $('file-input').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) {
@@ -1981,11 +2218,67 @@ $('bin-base-addr').addEventListener('change', () => {
 });
 
 const updateProgramProgress = (step, current, total) => {
-  const percent = Math.round((current / total) * 100);
+  const safeTotal = Math.max(1, total);
+  const percent = Math.max(0, Math.min(100, (current / safeTotal) * 100));
   $('progress-step').textContent = step;
-  $('progress-percent').textContent = `${percent}%`;
-  $('progress-bar-program').style.width = `${percent}%`;
+  $('progress-percent').textContent = `${percent.toFixed(1)}%`;
+  const bar = $('progress-bar-program');
+  bar.classList.remove('done', 'error');
+  if (percent >= 100) {
+    bar.classList.add('done');
+  }
+  bar.style.width = `${percent.toFixed(2)}%`;
+  updateProgramEta(percent);
   $('progress-detail').textContent = `${(current / 1024).toFixed(2)} / ${(total / 1024).toFixed(2)} KB`;
+};
+
+const formatEta = (seconds) => {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rs = s % 60;
+  return `${m}m ${rs}s`;
+};
+
+const updateProgramEta = (percent) => {
+  const etaEl = $('progress-eta');
+  if (!programProgressStartTs || percent <= 0) {
+    etaEl.textContent = 'ETA --';
+    return;
+  }
+  if (percent >= 100) {
+    etaEl.textContent = 'ETA 0s';
+    return;
+  }
+  const elapsedSec = (Date.now() - programProgressStartTs) / 1000;
+  const doneRatio = percent / 100;
+  if (doneRatio <= 0) {
+    etaEl.textContent = 'ETA --';
+    return;
+  }
+  const remainSec = elapsedSec * (1 - doneRatio) / doneRatio;
+  etaEl.textContent = `ETA ${formatEta(remainSec)}`;
+};
+
+const updateProgramProgressByStage = (stage, step, current, total, detailText = '') => {
+  const weights = { erase: 20, program: 65, verify: 15 };
+  const safeTotal = Math.max(1, total);
+  const ratio = Math.max(0, Math.min(1, current / safeTotal));
+
+  let base = 0;
+  if (stage === 'program') base = weights.erase;
+  if (stage === 'verify') base = weights.erase + weights.program;
+
+  const percent = Math.max(0, Math.min(100, base + ratio * (weights[stage] || 0)));
+  $('progress-step').textContent = step;
+  $('progress-percent').textContent = `${percent.toFixed(1)}%`;
+
+  const bar = $('progress-bar-program');
+  bar.classList.remove('done', 'error');
+  bar.style.width = `${percent.toFixed(2)}%`;
+  updateProgramEta(percent);
+
+  $('progress-detail').textContent = detailText || `${(current / 1024).toFixed(2)} / ${(total / 1024).toFixed(2)} KB`;
 };
 
 $('btn-program').addEventListener('click', async () => {
@@ -2006,6 +2299,10 @@ $('btn-program').addEventListener('click', async () => {
   
   $('btn-program').disabled = true;
   $('progress-program').style.display = 'block';
+  $('progress-bar-program').classList.remove('done', 'error');
+  programProgressStartTs = Date.now();
+  $('progress-eta').textContent = 'ETA --';
+  updateProgramProgress('准备中', 0, 1);
   
   
   try {
@@ -2071,25 +2368,75 @@ $('btn-program').addEventListener('click', async () => {
     await new Promise(r => setTimeout(r, 100));
     
     const { segments } = firmwareData;
+
+    const flashSizeKBForProgram = detectedFlashSizeKB > 0 ? detectedFlashSizeKB : DEFAULT_FLASH_SIZE_KB;
+    const flashEndExclusive = FLASH_BASE_ADDR + flashSizeKBForProgram * 1024;
+    const programSegments = [];
+    let skippedSegments = 0;
+
+    for (const seg of segments) {
+      const segStart = seg.addr >>> 0;
+      const segEndExclusive = (seg.addr + seg.data.length) >>> 0;
+
+      if (segEndExclusive <= FLASH_BASE_ADDR || segStart >= flashEndExclusive) {
+        skippedSegments++;
+        continue;
+      }
+
+      const clipStart = Math.max(segStart, FLASH_BASE_ADDR);
+      const clipEndExclusive = Math.min(segEndExclusive, flashEndExclusive);
+      const startOffset = clipStart - segStart;
+      const endOffset = clipEndExclusive - segStart;
+      const clippedData = seg.data.slice(startOffset, endOffset);
+
+      if (clippedData.length > 0) {
+        programSegments.push({ addr: clipStart >>> 0, data: clippedData });
+      }
+    }
+
+    if (programSegments.length === 0) {
+      throw new Error(`HEX/BIN 中没有可编程的 Flash 段 (范围 0x${FLASH_BASE_ADDR.toString(16)} ~ 0x${(flashEndExclusive - 1).toString(16)})`);
+    }
+
+    if (skippedSegments > 0) {
+      log(`⚠ 跳过 ${skippedSegments} 个非 Flash 地址段（超出 0x${FLASH_BASE_ADDR.toString(16)}~0x${(flashEndExclusive - 1).toString(16)}）`, 'warn');
+    }
+
+    programSegments.sort((a, b) => a.addr - b.addr);
+
     let totalProgrammed = 0;
-    const totalSize = segments.reduce((sum, seg) => sum + seg.data.length, 0);
+    const totalSize = programSegments.reduce((sum, seg) => sum + seg.data.length, 0);
+
+    const profile = stlink.configureProgrammingProfile({
+      firmwareSizeBytes: totalSize,
+      chipFlashKB: detectedFlashSizeKB,
+    });
+    stlink.armLoaded = false;
+    stlink.armWriterDisabled = false;
+    log(`写入模式: ${PROGRAM_WRITE_MODE === 'arm_only' ? 'ARM-only（不回退）' : 'ARM优先（失败回退direct）'}`, PROGRAM_WRITE_MODE === 'arm_only' ? 'warn' : 'info');
+    log(
+      `编程超时策略: FW ${(totalSize / 1024).toFixed(1)}KB, Chip ${profile.chipFlashKB || '未知'}KB, write状态 ${profile.writeMem8StatusTimeoutMs}ms, BKPT ${profile.waitForBreakpointMs}ms, 重试 ${profile.writeMem8RetryCount} 次`,
+      'info'
+    );
     
     // 可选：全片擦除
     if ($('opt-erase-all').checked) {
       log('执行全片擦除（较耗时，请等待）...', 'warn');
       const pageSize = 1024;  // STM32F1/GD32F1 页大小
-      const maxPages = 512;   // 最多 512KB / 1KB
+      const maxPages = Math.max(1, Math.floor((flashSizeKBForProgram * 1024) / pageSize));
+      log(`全片擦除范围: ${flashSizeKBForProgram}KB (${maxPages} 页)`, 'info');
       
       for (let p = 0; p < maxPages; p++) {
         const pageAddr = 0x08000000 + (p * pageSize);
         const ok = await stlink.flashErasePage(pageAddr);
+        updateProgramProgressByStage('erase', '全片擦除中', p + 1, maxPages, `页擦除 ${p + 1}/${maxPages}`);
         
         if ((p + 1) % 64 === 0) {
           log(`  ▕ 已擦除 ${p + 1} 页...`, 'info');
         }
         
         if (!ok) {
-          console.warn(`页擦除可能失败于 0x${pageAddr.toString(16)}`);
+          throw new Error(`全片擦除失败于 0x${pageAddr.toString(16)}`);
         }
       }
       log('✓ 全片擦除完成', 'ok');
@@ -2099,7 +2446,7 @@ $('btn-program').addEventListener('click', async () => {
       const pageSize = 1024;
       const pagesToErase = new Set();
       
-      for (const seg of segments) {
+      for (const seg of programSegments) {
         for (let addr = seg.addr; addr < seg.addr + seg.data.length; addr += pageSize) {
           const pageStart = Math.floor(addr / pageSize) * pageSize;
           pagesToErase.add(pageStart);
@@ -2110,6 +2457,7 @@ $('btn-program').addEventListener('click', async () => {
       for (const pageAddr of pagesToErase) {
         const ok = await stlink.flashErasePage(pageAddr);
         erased++;
+        updateProgramProgressByStage('erase', '擦除目标页', erased, pagesToErase.size, `页擦除 ${erased}/${pagesToErase.size}`);
         if (!ok) {
           console.warn(`页擦除可能失败于 0x${pageAddr.toString(16)}`);
         }
@@ -2117,6 +2465,9 @@ $('btn-program').addEventListener('click', async () => {
       
       log(`✓ 已擦除 ${erased} 个页面`, 'ok');
     }
+
+    log('擦除后清理 Flash 错误状态...', 'info');
+    await stlink.clearFlashError();
     
     await new Promise(r => setTimeout(r, 100));
     
@@ -2126,12 +2477,12 @@ $('btn-program').addEventListener('click', async () => {
     const BLOCK_SIZE = 256;  // 每块 256 字节 (平衡 USB 往返和操作数)
     let lastSegIndex = -1;
     
-    for (let segIdx = 0; segIdx < segments.length; segIdx++) {
-      const segment = segments[segIdx];
+    for (let segIdx = 0; segIdx < programSegments.length; segIdx++) {
+      const segment = programSegments[segIdx];
       const { addr, data } = segment;
       
       if (segIdx !== lastSegIndex) {
-        log(`▸ 段 ${segIdx + 1}/${segments.length}: 0x${addr.toString(16).toUpperCase().padStart(8, '0')} (${data.length} 字节)`, 'info');
+        log(`▸ 段 ${segIdx + 1}/${programSegments.length}: 0x${addr.toString(16).toUpperCase().padStart(8, '0')} (${data.length} 字节)`, 'info');
         lastSegIndex = segIdx;
       }
       
@@ -2148,10 +2499,13 @@ $('btn-program').addEventListener('click', async () => {
           
           totalProgrammed += blockSize;
           
-          // 每 512 字节更新一次进度
-          if ((totalProgrammed % 512) === 0 || totalProgrammed === totalSize) {
-            updateProgramProgress(`段 ${segIdx + 1}/${segments.length}`, totalProgrammed, totalSize);
-          }
+          updateProgramProgressByStage(
+            'program',
+            `写入 段 ${segIdx + 1}/${programSegments.length}`,
+            totalProgrammed,
+            totalSize,
+            `地址 0x${blockAddr.toString(16).toUpperCase().padStart(8, '0')} · ${(totalProgrammed / 1024).toFixed(2)} / ${(totalSize / 1024).toFixed(2)} KB`
+          );
           
         } catch (e) {
           throw new Error(`编程失败于地址 0x${blockAddr.toString(16)}: ${e.message}`);
@@ -2164,11 +2518,16 @@ $('btn-program').addEventListener('click', async () => {
     // 可选：验证
     if ($('opt-verify').checked) {
       log('验证编程数据...', 'info');
-      updateProgramProgress('验证中', 0, totalSize);
+      log('验证前确认内核暂停...', 'info');
+      const verifyHalted = await stlink.haltCoreAndCheck(1200);
+      if (!verifyHalted) {
+        throw new Error('验证前无法确保目标内核处于 HALT 状态');
+      }
+      updateProgramProgressByStage('verify', '验证中', 0, totalSize);
       
       let verified = 0;
-      for (let segIdx = 0; segIdx < segments.length; segIdx++) {
-        const { addr, data } = segments[segIdx];
+      for (let segIdx = 0; segIdx < programSegments.length; segIdx++) {
+        const { addr, data } = programSegments[segIdx];
         
         for (let i = 0; i < data.length; i += 4) {
           const readAddr = addr + i;
@@ -2180,20 +2539,56 @@ $('btn-program').addEventListener('click', async () => {
           }
           
           if (readVal !== expectedVal) {
-            throw new Error(`验证失败于 0x${readAddr.toString(16)}: 期望 0x${expectedVal.toString(16).padStart(8, '0')}, 实际 0x${readVal.toString(16).padStart(8, '0')}`);
+            let confirmedVal = readVal >>> 0;
+            let recovered = false;
+
+            for (let retry = 1; retry <= 2; retry++) {
+              await new Promise(r => setTimeout(r, 6));
+              const retryVal = await stlink.readMem32(readAddr);
+              confirmedVal = retryVal >>> 0;
+              if (retryVal === expectedVal) {
+                recovered = true;
+                log(`验证重读恢复: 0x${readAddr.toString(16)} 第 ${retry + 1} 次读回正确`, 'warn');
+                break;
+              }
+            }
+
+            if (!recovered) {
+              const repairBlockOffset = Math.floor(i / BLOCK_SIZE) * BLOCK_SIZE;
+              const repairAddr = addr + repairBlockOffset;
+              const repairLen = Math.min(BLOCK_SIZE, data.length - repairBlockOffset);
+              const repairData = data.slice(repairBlockOffset, repairBlockOffset + repairLen);
+
+              log(`⚠ 校验失败，尝试 direct 修复块: 0x${repairAddr.toString(16)} (${repairLen} 字节)`, 'warn');
+              await stlink.recoverFlashProgrammingState();
+              const repairOk = await stlink.flashBlockDirect(repairAddr, repairData);
+              if (!repairOk) {
+                throw new Error(`验证失败于 0x${readAddr.toString(16)}: 期望 0x${(expectedVal >>> 0).toString(16).padStart(8, '0')}, 实际 0x${(confirmedVal >>> 0).toString(16).padStart(8, '0')}（direct 修复失败）`);
+              }
+
+              await new Promise(r => setTimeout(r, 10));
+              const repairedVal = await stlink.readMem32(readAddr);
+              if (repairedVal !== expectedVal) {
+                throw new Error(`验证失败于 0x${readAddr.toString(16)}: 期望 0x${(expectedVal >>> 0).toString(16).padStart(8, '0')}, 实际 0x${(repairedVal >>> 0).toString(16).padStart(8, '0')}（修复后仍不一致）`);
+              }
+
+              log(`✓ 已修复并通过复验: 0x${readAddr.toString(16)}`, 'ok');
+            }
           }
           
           verified += 4;
-          
-          if ((verified % 256) === 0) {
-            updateProgramProgress('验证中', verified, totalSize);
+
+          if ((verified % 32) === 0 || verified >= totalSize) {
+            updateProgramProgressByStage('verify', '验证中', verified, totalSize);
           }
         }
       }
       
       log(`✓ 验证成功 (${totalSize} 字节)`, 'ok');
     }
-    
+
+    updateProgramProgress('完成', 1, 1);
+
     // 运行芯片
     log('启动目标芯片...', 'info');
     try {
@@ -2211,6 +2606,8 @@ $('btn-program').addEventListener('click', async () => {
     log('────────────────────────────', 'ok');
     
   } catch (err) {
+    $('progress-bar-program').classList.add('error');
+    $('progress-eta').textContent = 'ETA --';
     log(`────────────────────────────`, 'err');
     log(`✗ 编程失败: ${err.message}`, 'err');
     log(`────────────────────────────`, 'err');
@@ -2235,6 +2632,7 @@ $('btn-program').addEventListener('click', async () => {
       await stlink.leaveState().catch(() => {});
     } catch (_) {}
     
+    programProgressStartTs = 0;
     $('btn-program').disabled = !connected;
     $('progress-program').style.display = 'none';
   }
@@ -2411,11 +2809,17 @@ $('btn-connect').addEventListener('click', async () => {
 $('btn-disconnect').addEventListener('click', async () => {
   await stlink.disconnect();
   connected = false;
+  resetFirmwareUI({ clearFileInput: true });
+  resetChipInfoPanel();
+  $('log').innerHTML = '';
+  $('info-stlink').textContent = '—';
+  $('info-vdd').textContent = '—';
   setStatus('未连接 ST-Link 设备');
   $('btn-connect').style.display = 'inline-flex';
   $('btn-disconnect').style.display = 'none';
   $('btn-read').disabled = true;
-  log('已断开连接', 'warn');
+  $('btn-program').disabled = true;
+  log('已断开连接，页面已清空', 'warn');
 });
 
 $('btn-read').addEventListener('click', async () => {
@@ -2614,6 +3018,8 @@ $('btn-read').addEventListener('click', async () => {
       flash: flashSize > 0 ? `${flashSize} KB` : '64KB-512KB',
       sram: '8KB-64KB'
     };
+
+    detectedFlashSizeKB = flashSize > 0 ? flashSize : 0;
     
     // 显示识别结果
     const idcodeDisplay = dbgmcuIdcode > 0 ? `0x${dbgmcuIdcode.toString(16).padStart(8,'0')}` : '未读取';
@@ -2745,12 +3151,7 @@ $('btn-read').addEventListener('click', async () => {
 });
 
 $('btn-clear').addEventListener('click', () => {
-  $('chip-id-display').className = 'chip-id-display empty';
-  $('chip-id-display').textContent = '-- 等待读取 --';
-  $('uid-bytes').innerHTML = '';
-  $('btn-copy').disabled = true;
-  $('chip-hint').textContent = '连接设备后点击"读取 Chip ID"';
-  ['info-model','info-core','info-flash','info-sram','info-idcode','info-rev'].forEach(id => $(id).textContent = '—');
+  resetChipInfoPanel();
 });
 
 $('btn-clear-log').addEventListener('click', () => { $('log').innerHTML = ''; });

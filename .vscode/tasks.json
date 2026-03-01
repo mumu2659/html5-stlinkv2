@@ -1,0 +1,26 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Start ST-Link WebUSB Page",
+			"type": "shell",
+			"command": "./start_local.command",
+			"isBackground": true,
+			"group": "build"
+		},
+		{
+			"label": "Start ST-Link WebUSB Page (Chrome)",
+			"type": "shell",
+			"command": "./start_local.command 8000 chrome",
+			"isBackground": true,
+			"group": "build"
+		},
+		{
+			"label": "Start ST-Link WebUSB Page (Edge)",
+			"type": "shell",
+			"command": "./start_local.command 8000 edge",
+			"isBackground": true,
+			"group": "build"
+		}
+	]
+}
