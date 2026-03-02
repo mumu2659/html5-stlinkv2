@@ -13,6 +13,18 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
+if [[ ! -f "html5_stlinkv2.html" ]]; then
+  echo "错误：找不到 html5_stlinkv2.html 文件"
+  exit 1
+fi
+
+if lsof -i :${PORT} >/dev/null 2>&1; then
+  echo "错误：端口 ${PORT} 已被占用"
+  echo "正在尝试清理端口..."
+  lsof -i :${PORT} | grep -v COMMAND | awk '{print $2}' | xargs kill -9 2>/dev/null
+  sleep 1
+fi
+
 echo "正在启动本地服务：http://localhost:${PORT}"
 echo "按 Ctrl+C 可停止服务"
 echo "浏览器模式：${BROWSER}"
