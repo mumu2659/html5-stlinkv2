@@ -735,6 +735,12 @@
         开始编程
       </button>
     </div>
+
+    <div class="field-group" style="margin-top:-4px; margin-bottom:10px;">
+      <div style="font-family:'Share Tech Mono', monospace; font-size:0.78rem; color:var(--dim);">
+        本次下载总用时：<span id="program-last-time" style="color:var(--text)">--</span>
+      </div>
+    </div>
     
     <div class="progress-section" id="progress-program" style="display:none; margin-top:16px">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
@@ -2320,6 +2326,7 @@ const resetProgramProgressUI = () => {
   $('progress-percent').textContent = '0%';
   $('progress-detail').textContent = '--';
   $('progress-eta').textContent = 'ETA --';
+  setProgramElapsed(NaN);
 };
 
 const resetFirmwareUI = ({ clearFileInput = false } = {}) => {
@@ -2429,6 +2436,29 @@ const updateProgramEta = (percent) => {
   etaEl.textContent = `ETA ${formatEta(remainSec)}`;
 };
 
+const formatProgramElapsed = (elapsedMs) => {
+  const ms = Math.max(0, Math.round(elapsedMs));
+  const sec = ms / 1000;
+  if (sec < 60) {
+    return `${sec.toFixed(2)}s`;
+  }
+  const min = Math.floor(sec / 60);
+  const rem = sec - min * 60;
+  return `${min}m ${rem.toFixed(2)}s`;
+};
+
+const setProgramElapsed = (elapsedMs, ok = true) => {
+  const el = $('program-last-time');
+  if (!el) return;
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) {
+    el.textContent = '--';
+    el.style.color = 'var(--text)';
+    return;
+  }
+  el.textContent = formatProgramElapsed(elapsedMs);
+  el.style.color = ok ? 'var(--green)' : 'var(--accent2)';
+};
+
 const updateProgramProgressByStage = (stage, step, current, total, detailText = '') => {
   const weights = { erase: 20, program: 65, verify: 15 };
   const safeTotal = Math.max(1, total);
@@ -2473,7 +2503,8 @@ $('btn-program').addEventListener('click', async () => {
   $('btn-program').disabled = true;
   $('progress-program').style.display = 'block';
   $('progress-bar-program').classList.remove('done', 'error');
-  programProgressStartTs = Date.now();
+  const runStartTs = Date.now();
+  programProgressStartTs = runStartTs;
   $('progress-eta').textContent = 'ETA --';
   updateProgramProgress('准备中', 0, 1);
 
@@ -2853,13 +2884,19 @@ $('btn-program').addEventListener('click', async () => {
     
     log('────────────────────────────', 'ok');
     log('✓ 固件更新完成！', 'ok');
+    const totalElapsedMs = Date.now() - runStartTs;
+    log(`⏱ 总用时: ${formatProgramElapsed(totalElapsedMs)}`, 'ok');
     log('────────────────────────────', 'ok');
+    setProgramElapsed(totalElapsedMs, true);
     
   } catch (err) {
     $('progress-bar-program').classList.add('error');
     $('progress-eta').textContent = 'ETA --';
+    const totalElapsedMs = Date.now() - runStartTs;
+    setProgramElapsed(totalElapsedMs, false);
     log(`────────────────────────────`, 'err');
     log(`✗ 编程失败: ${err.message}`, 'err');
+    log(`⏱ 失败前用时: ${formatProgramElapsed(totalElapsedMs)}`, 'err');
     log(`────────────────────────────`, 'err');
     console.error(err);
   } finally {
