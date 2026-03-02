@@ -755,8 +755,10 @@
       <div class="info-item"><div class="info-key">内核</div><div class="info-val" id="info-core">—</div></div>
       <div class="info-item"><div class="info-key">Flash 大小</div><div class="info-val" id="info-flash">—</div></div>
       <div class="info-item"><div class="info-key">SRAM 大小</div><div class="info-val" id="info-sram">—</div></div>
+      <div class="info-item"><div class="info-key">厂商</div><div class="info-val" id="info-mfr">—</div></div>
       <div class="info-item"><div class="info-key">IDCODE</div><div class="info-val highlight" id="info-idcode">—</div></div>
-      <div class="info-item"><div class="info-key">Revision</div><div class="info-val" id="info-rev">—</div></div>
+      <div class="info-item"><div class="info-key">DEV_ID</div><div class="info-val" id="info-devid">—</div></div>
+      <div class="info-item"><div class="info-key">REV_ID</div><div class="info-val" id="info-rev">—</div></div>
       <div class="info-item"><div class="info-key">目标电压</div><div class="info-val highlight" id="info-vdd">—</div></div>
       <div class="info-item"><div class="info-key">ST-Link 版本</div><div class="info-val" id="info-stlink">—</div></div>
     </div>
@@ -2188,38 +2190,65 @@ class STLinkUSB {
 }
 
 // ─────────────────────────────────────────
-// 已知 IDCODE 数据库
+// STM32 DEV_ID 数据库（按 DBGMCU_IDCODE bits[11:0]）
+// 参考：RM0008 §31.6.1, RM0090, RM0385 等
 // ─────────────────────────────────────────
-const IDCODE_DB = {
-  0x10016413: { model: 'STM32F405/407/415/417', core: 'Cortex-M4', flash: '1MB', sram: '192KB' },
-  0x10036413: { model: 'STM32F42x/43x',         core: 'Cortex-M4', flash: '2MB', sram: '256KB' },
-  0x20016419: { model: 'STM32F40x/41x Rev B',   core: 'Cortex-M4', flash: '1MB', sram: '192KB' },
-  0x10016411: { model: 'STM32F2xx',             core: 'Cortex-M3', flash: '1MB', sram: '128KB' },
-  0x10016420: { model: 'STM32F410',             core: 'Cortex-M4', flash: '128KB', sram: '32KB' },
-  0x20016421: { model: 'STM32F446',             core: 'Cortex-M4', flash: '512KB', sram: '128KB' },
-  0x10016434: { model: 'STM32F469/479',         core: 'Cortex-M4', flash: '2MB', sram: '384KB' },
-  0x10016449: { model: 'STM32F74x/75x',         core: 'Cortex-M7', flash: '1MB', sram: '512KB' },
-  0x10016451: { model: 'STM32F76x/77x',         core: 'Cortex-M7', flash: '2MB', sram: '512KB' },
-  0x10016450: { model: 'STM32H74x/75x',         core: 'Cortex-M7', flash: '2MB', sram: '1MB' },
-  0x10016458: { model: 'STM32H7Ax/7Bx',         core: 'Cortex-M7', flash: '2MB', sram: '1.4MB' },
-  0x20016410: { model: 'STM32F101xx Med',        core: 'Cortex-M3', flash: '128KB', sram: '20KB' },
-  0x20036410: { model: 'STM32F103xx Med',        core: 'Cortex-M3', flash: '128KB', sram: '20KB' },
-  0x00016410: { model: 'STM32F103xx Ld',         core: 'Cortex-M3', flash: '64KB', sram: '20KB' },
-  0x30016410: { model: 'STM32F103xx Hi',         core: 'Cortex-M3', flash: '512KB', sram: '64KB' },
-  0x10016460: { model: 'STM32G07x/08x',          core: 'Cortex-M0+', flash: '64KB', sram: '36KB' },
-  0x10016467: { model: 'STM32G071/081',          core: 'Cortex-M0+', flash: '128KB', sram: '36KB' },
-  0x10016495: { model: 'STM32WBxx',             core: 'Cortex-M4+M0', flash: '1MB', sram: '256KB' },
+const DEV_ID_DB = {
+  // STM32F1 系列
+  0x412: { density: 'Low',          series: 'STM32F10x',     core: 'Cortex-M3', sramKB: 10 },
+  0x410: { density: 'Medium',       series: 'STM32F10x',     core: 'Cortex-M3', sramKB: 20 },
+  0x414: { density: 'High',         series: 'STM32F10x',     core: 'Cortex-M3', sramKB: 64 },
+  0x430: { density: 'XL',           series: 'STM32F10x',     core: 'Cortex-M3', sramKB: 96 },
+  0x418: { density: 'Connectivity', series: 'STM32F10x',     core: 'Cortex-M3', sramKB: 64 },
+  0x420: { density: 'VL-Medium',    series: 'STM32F100',     core: 'Cortex-M3', sramKB: 8 },
+  0x428: { density: 'VL-High',      series: 'STM32F100',     core: 'Cortex-M3', sramKB: 32 },
+  // STM32F2
+  0x411: { density: '',             series: 'STM32F2xx',     core: 'Cortex-M3', sramKB: 128 },
+  // STM32F4
+  0x413: { density: '',             series: 'STM32F405/407', core: 'Cortex-M4', sramKB: 192 },
+  0x419: { density: '',             series: 'STM32F42x/43x', core: 'Cortex-M4', sramKB: 256 },
+  0x421: { density: '',             series: 'STM32F446',     core: 'Cortex-M4', sramKB: 128 },
+  0x434: { density: '',             series: 'STM32F469/479', core: 'Cortex-M4', sramKB: 384 },
+  // STM32F7
+  0x449: { density: '',             series: 'STM32F74x/75x', core: 'Cortex-M7', sramKB: 320 },
+  0x451: { density: '',             series: 'STM32F76x/77x', core: 'Cortex-M7', sramKB: 512 },
+  // STM32H7
+  0x450: { density: '',             series: 'STM32H74x/75x', core: 'Cortex-M7', sramKB: 1024 },
+  0x458: { density: '',             series: 'STM32H7Ax/7Bx', core: 'Cortex-M7', sramKB: 1400 },
+  // STM32G0
+  0x460: { density: '',             series: 'STM32G07x/08x', core: 'Cortex-M0+', sramKB: 36 },
+  0x467: { density: '',             series: 'STM32G071/081', core: 'Cortex-M0+', sramKB: 36 },
+  // STM32WB
+  0x495: { density: '',             series: 'STM32WBxx',     core: 'Cortex-M4+M0', sramKB: 256 },
 };
 
-function lookupIDCODE(idcode) {
-  const entry = IDCODE_DB[idcode];
-  if (entry) return entry;
-  // Try masking revision
-  const masked = idcode & 0x0FFFFFFF;
-  for (const [k, v] of Object.entries(IDCODE_DB)) {
-    if ((parseInt(k) & 0x0FFFFFFF) === masked) return v;
-  }
-  return null;
+// STM32F1 REV_ID 对照表 (RM0008 §31.6.1)
+const STM32F1_REV_DB = {
+  0x1000: 'Rev A',
+  0x1001: 'Rev Z',
+  0x1003: 'Rev 1/2/3/X/Y',
+  0x2000: 'Rev B',
+  0x2001: 'Rev Z',
+  0x2003: 'Rev 1/2/3/X/Y',
+  0x3001: 'Rev Z',
+};
+
+function lookupDEV_ID(devId) {
+  return DEV_ID_DB[devId] || null;
+}
+
+function lookupREV_ID(revId) {
+  return STM32F1_REV_DB[revId] || `0x${revId.toString(16).padStart(4, '0')}`;
+}
+
+// 根据 Flash 容量推断 STM32F1/GD32F1 SRAM 大小 (KB)
+function inferF1SramKB(flashKB) {
+  if (flashKB <= 0) return 20;      // 未知时默认 20KB
+  if (flashKB <= 32) return 10;     // Low-density: 6-10KB
+  if (flashKB <= 128) return 20;    // Medium-density: 20KB
+  if (flashKB <= 256) return 48;    // High-density: 48KB
+  if (flashKB <= 512) return 64;    // High-density: 64KB
+  return 96;                         // XL-density: 96KB
 }
 
 // ─────────────────────────────────────────
@@ -2627,7 +2656,7 @@ const resetChipInfoPanel = () => {
   $('uid-bytes').innerHTML = '';
   $('btn-copy').disabled = true;
   $('chip-hint').textContent = '连接设备后点击"读取 Chip ID"';
-  ['info-model','info-core','info-flash','info-sram','info-idcode','info-rev'].forEach(id => $(id).textContent = '—');
+  ['info-model','info-core','info-flash','info-sram','info-idcode','info-rev','info-devid','info-mfr'].forEach(id => $(id).textContent = '—');
 };
 
 const resetProgramProgressUI = () => {
@@ -3779,21 +3808,56 @@ $('btn-read').addEventListener('click', async () => {
       chipInfo = { series: 'STM32F1/GD32F1', manufacturer: '未确定' };
     }
     
-    // 完整芯片信息
+    // 解析 DBGMCU_IDCODE 各字段
+    const deviceId = dbgmcuIdcode & 0xFFF;               // bits[11:0] = DEV_ID
+    const revId = (dbgmcuIdcode >>> 16) & 0xFFFF;        // bits[31:16] = REV_ID
+    const devInfo = lookupDEV_ID(deviceId);
+    
+    // 根据 DEV_ID 确定密度等级和 SRAM
+    let densityLabel = '';
+    let sramKB = 0;
+    if (devInfo) {
+      densityLabel = devInfo.density ? ` ${devInfo.density}-density` : '';
+      sramKB = devInfo.sramKB;
+    }
+    
+    // F1 系列根据实际 Flash 大小精确推断 SRAM
+    const isF1Series = chipInfo.series === 'STM32F1' || chipInfo.series === 'GD32F1';
+    if (isF1Series && flashSize > 0) {
+      sramKB = inferF1SramKB(flashSize);
+    }
+
+    // 构建型号字符串
+    let modelStr;
+    if (chipInfo.series === 'GD32F1') {
+      modelStr = `GD32F10x${densityLabel}`;
+    } else if (chipInfo.series === 'STM32F1' && devInfo) {
+      modelStr = `${devInfo.series}${densityLabel}`;
+    } else if (devInfo) {
+      modelStr = devInfo.series;
+    } else {
+      modelStr = chipInfo.series || '未知芯片';
+    }
+
     const fullChipInfo = {
       ...chipInfo,
-      model: chipInfo.series === 'GD32F1' ? 'GD32F103 系列' : 'STM32F103 系列',
-      core: 'Cortex-M3',
-      flash: flashSize > 0 ? `${flashSize} KB` : '64KB-512KB',
-      sram: '8KB-64KB'
+      model: modelStr,
+      core: (devInfo && devInfo.core) || 'Cortex-M3',
+      flash: flashSize > 0 ? `${flashSize} KB` : '未知',
+      sram: sramKB > 0 ? `${sramKB} KB` : '未知',
     };
 
     detectedFlashSizeKB = flashSize > 0 ? flashSize : 0;
     
     // 显示识别结果
-    const idcodeDisplay = dbgmcuIdcode > 0 ? `0x${dbgmcuIdcode.toString(16).padStart(8,'0')}` : '未读取';
-    $('info-idcode').textContent = idcodeDisplay;
-    $('info-rev').textContent = fullChipInfo.manufacturer;
+    const idcodeHex = dbgmcuIdcode > 0 ? `0x${dbgmcuIdcode.toString(16).toUpperCase().padStart(8,'0')}` : '未读取';
+    const devIdHex = `0x${deviceId.toString(16).toUpperCase().padStart(3,'0')}`;
+    const revIdStr = lookupREV_ID(revId);
+    
+    $('info-idcode').textContent = idcodeHex;
+    $('info-devid').textContent = devIdHex + (devInfo ? ` (${devInfo.density || devInfo.series})` : '');
+    $('info-rev').textContent = revIdStr;
+    $('info-mfr').textContent = fullChipInfo.manufacturer;
     $('info-model').textContent = fullChipInfo.model;
     $('info-core').textContent = fullChipInfo.core;
     $('info-flash').textContent = fullChipInfo.flash;
@@ -3802,7 +3866,9 @@ $('btn-read').addEventListener('click', async () => {
     log(`  ✔ 芯片系列: ${fullChipInfo.series}`, 'ok');
     log(`  ✔ 芯片型号: ${fullChipInfo.model}`, 'ok');
     log(`  ✔ 厂商: ${fullChipInfo.manufacturer}`, 'ok');
-    if (flashSize > 0) log(`  ✔ Flash 大小: ${flashSize} KB`, 'ok');
+    log(`  ✔ IDCODE: ${idcodeHex} (DEV_ID=${devIdHex}, REV_ID=${revIdStr})`, 'ok');
+    if (flashSize > 0) log(`  ✔ Flash: ${flashSize} KB`, 'ok');
+    if (sramKB > 0) log(`  ✔ SRAM: ${sramKB} KB`, 'ok');
 
     // Helper: 尝试多个地址，选出第一个返回非零的 UID 基址（带超时保护）
     // 核心原则：一旦找到有效地址，立即返回，不再继续尝试
@@ -3849,9 +3915,13 @@ $('btn-read').addEventListener('click', async () => {
     log('读取 96-bit UID...', 'info');
     const [w0, w1, w2] = await stlink.readUID(uidBase);
 
-    const toHex8 = n => (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
-    const uidStr = toHex8(w0) + toHex8(w1) + toHex8(w2);
-    const uidFmt = `${toHex8(w0)}-${toHex8(w1)}-${toHex8(w2)}`;
+    // 将 32 位字按内存字节序（小端）转为 hex 字符串
+    const wordToLeHex = n => {
+      const b0 = (n >>> 0) & 0xFF, b1 = (n >>> 8) & 0xFF, b2 = (n >>> 16) & 0xFF, b3 = (n >>> 24) & 0xFF;
+      return [b0, b1, b2, b3].map(b => b.toString(16).toUpperCase().padStart(2, '0')).join('');
+    };
+    const uidStr = wordToLeHex(w0) + wordToLeHex(w1) + wordToLeHex(w2);
+    const uidFmt = `${wordToLeHex(w0)}-${wordToLeHex(w1)}-${wordToLeHex(w2)}`;
 
     // 显示结果 - 立即显示，不等待
     const disp = $('chip-id-display');
@@ -3860,16 +3930,19 @@ $('btn-read').addEventListener('click', async () => {
 
     const bytesEl = $('uid-bytes');
     bytesEl.innerHTML = '';
-    const bytes = [];
-    for (let i = 0; i < 12; i++) {
-      const word = [w0, w1, w2][Math.floor(i / 4)];
-      bytes.push((word >>> ((i % 4) * 8)) & 0xFF);
-    }
-    // 立即显示所有字节，不使用动画延迟
-    bytes.forEach((b) => {
+    // 显示原始寄存器数据（地址 + 32位原始值 + 高/低位标注）
+    const rawWords = [
+      { addr: uidBase,     val: w0, label: 'UID[31:0]',  desc: 'X/Y 坐标' },
+      { addr: uidBase + 4, val: w1, label: 'UID[63:32]', desc: '晶圆号+批次低位' },
+      { addr: uidBase + 8, val: w2, label: 'UID[95:64]', desc: '批次号(ASCII)' },
+    ];
+    rawWords.forEach(({ addr, val, label, desc }) => {
       const span = document.createElement('span');
-      span.className = 'uid-byte show';  // 直接添加 show 类
-      span.textContent = b.toString(16).toUpperCase().padStart(2, '0');
+      span.className = 'uid-byte show';
+      span.style.cssText = 'font-size:0.68rem; min-width:auto; padding:3px 6px; letter-spacing:0.3px; text-align:center; line-height:1.4;';
+      const addrHex = addr.toString(16).toUpperCase();
+      const valHex = (val >>> 0).toString(16).toUpperCase().padStart(8, '0');
+      span.innerHTML = `<span style="opacity:0.6">${label}</span><br>[0x${addrHex}] = 0x${valHex}<br><span style="opacity:0.45;font-size:0.6rem">${desc}</span>`;
       bytesEl.appendChild(span);
     });
 
