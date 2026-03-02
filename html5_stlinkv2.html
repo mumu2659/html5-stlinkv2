@@ -911,15 +911,12 @@ const SWD_FREQ_MAP = [
   [125000, 6],
 ];
 
-const PROGRAM_WRITE_MODE = 'arm_only'; // 'arm_only' | 'hybrid'
-
 class STLinkUSB {
   constructor() {
     this.device = null;
     this.epIn = null;
     this.epOut = null;
     this.armLoaded = false;  // ARM Flash 程序是否已加载到 SRAM
-    this.armWriterDisabled = false;  // 当前会话是否禁用 ARM writer（失败后固定 direct）
     this.armWriterStaticRegsReady = false;  // ARM writer 常量寄存器（R4/R5/R6）是否已配置
     this.programmingProfile = {
       firmwareSizeBytes: 0,
@@ -965,26 +962,6 @@ class STLinkUSB {
     };
 
     return { ...this.programmingProfile };
-  }
-
-  async connect() {
-    const filters = [
-      { vendorId: STLINK_VID, productId: STLINK_PID_V2 },
-      { vendorId: STLINK_VID, productId: STLINK_PID_V21 },
-    ];
-    this.device = await navigator.usb.requestDevice({ filters });
-    await this.device.open();
-    if (this.device.configuration === null)
-      await this.device.selectConfiguration(1);
-    await this.device.claimInterface(0);
-
-    // 找到端点
-    const iface = this.device.configuration.interfaces[0].alternate;
-    for (const ep of iface.endpoints) {
-      if (ep.direction === 'in')  this.epIn  = ep.endpointNumber;
-      if (ep.direction === 'out') this.epOut = ep.endpointNumber;
-    }
-    return this.device.productName || 'ST-Link V2';
   }
 
   async disconnect() {
@@ -1081,26 +1058,7 @@ class STLinkUSB {
     if (!result) {
       throw new Error('无法读取响应数据');
     }
-
-    // 诊断：打印前 16 字节
-    if (cmdBytes[0] === CMD.DEBUG_COMMAND && (cmdBytes[1] === DEBUG_CMD.READREG || cmdBytes[1] === DEBUG_CMD.READMEM_32BIT || cmdBytes[1] === DEBUG_CMD.READ_COREID)) {
-      console.log(`xfer(${['READREG','READMEM_32BIT','READ_COREID'][cmdBytes[1]===0x33?0:cmdBytes[1]===0x07?1:2]}) → raw=[${Array.from(result.slice(0,8)).map(x=>x.toString(16).padStart(2,'0')).join(' ')}]`);
-    }
     return result;
-  }
-
-  async getVersion() {
-    const r = await this.xfer([CMD.GET_VERSION], 8);
-    // Byte 0-1: version word, Byte 2-3: VID, Byte 4-5: PID
-    const ver = (r[0] << 8) | r[1];
-    const stlink_v = (ver >> 12) & 0xF;
-    const jtag_v   = (ver >> 6)  & 0x3F;
-    const swim_v   =  ver        & 0x3F;
-    // sanity check
-    if (stlink_v === 0 && jtag_v === 0) {
-      throw new Error(`固件版本读取异常 raw=[${Array.from(r.slice(0,4)).map(x=>x.toString(16).padStart(2,'0')).join(' ')}]`);
-    }
-    return `V${stlink_v}J${jtag_v}S${swim_v}`;
   }
 
   async getTargetVoltage() {
@@ -1119,18 +1077,15 @@ class STLinkUSB {
     try {
       await this.device.clearHalt('in',  this.epIn);
       await this.device.clearHalt('out', this.epOut);
-      console.log('enterDebugSWD: 端点已清理');
     } catch(e) {
       console.warn(`enterDebugSWD: clearHalt 异常（继续）: ${e.message}`);
     }
     
-    // 等待 200ms 让设备恢复
-    await new Promise(r => setTimeout(r, 200));
+    // 等待设备恢复（clearHalt 后的最小稳定间隔）
+    await new Promise(r => setTimeout(r, 30));
     
     const cmd = [CMD.DEBUG_COMMAND, DEBUG_CMD.ENTER, DEBUG_MODE.SWD];
-    console.log(`enterDebugSWD: 发送命令 [${Array.from(cmd).map(x=>x.toString(16)).join(',')}]`);
     const r = await this.xfer(cmd, 2);
-    console.log(`enterDebugSWD: 收到响应 [${Array.from(r.slice(0,2)).map(x=>x.toString(16).padStart(2,'0')).join(' ')}]`);
     const ok = r[0] === STLINK_STATUS_OK || r[0] === 0x00;
     if (!ok) throw new Error(`进入SWD失败 status=0x${r[0].toString(16)}`);
     return ok;
@@ -1151,29 +1106,6 @@ class STLinkUSB {
       }
     }
     throw new Error(`设定频率 ${freqHz / 1000000}MHz 过低`);
-  }
-
-  async exitDebug() {
-    if (!this.device) {
-      return false;
-    }
-    const mode = await this.getCurrentMode();
-    if (mode !== STLINK_MODE.DEBUG) {
-      return false;
-    }
-
-    // 使用较短的超时（1秒）确保快速失败
-    try {
-      await Promise.race([
-        this.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.EXIT], 2, 1000, true, true),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('exitDebug 超时')), 1200))
-      ]);
-      console.log('✓ 调试已退出');
-      return true;
-    } catch(e) {
-      console.log(`ℹ️ exitDebug 未响应: ${e.message}`);
-      return false;
-    }
   }
 
   async getCurrentMode() {
@@ -1358,7 +1290,6 @@ class STLinkUSB {
     const r = await this.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.READ_COREID], 4);
     // 小端格式，直接从前 4 字节提取
     const val = ((r[3] & 0xFF) << 24) | ((r[2] & 0xFF) << 16) | ((r[1] & 0xFF) << 8) | (r[0] & 0xFF);
-    console.log(`readCoreID: raw=[${Array.from(r.slice(0,4)).map(x=>x.toString(16).padStart(2,'0')).join(' ')}] = 0x${val.toString(16)}`);
     return val;
   }
 
@@ -1476,8 +1407,6 @@ class STLinkUSB {
         console.warn(`setReg(R${regNum}=0x${value.toString(16).padStart(8,'0')}): 返回异常状态 0x${r[0].toString(16).padStart(2,'0')}`);
         return false;
       }
-      
-      console.log(`setReg(R${regNum}=0x${value.toString(16).padStart(8,'0')}): ✓`);
       return ok;
     } catch (e) {
       console.error(`setReg(R${regNum}): ${e.message}`);
@@ -1529,7 +1458,6 @@ class STLinkUSB {
       try {
         const dhcsr = await this.readMem32(DHCSR);
         if ((dhcsr & 0x00020000) !== 0) { // S_HALT
-          console.log(`haltCoreAndCheck: ✓ halted (DHCSR=0x${dhcsr.toString(16)})`);
           return true;
         }
       } catch (_) {}
@@ -1621,72 +1549,6 @@ class STLinkUSB {
     return true;
   }
 
-  async writeMem32(addr, value) {
-    // 写入 32 位数据
-    // 正确时序：命令 OUT -> 数据 OUT -> GET_LAST_RW_STATUS 命令 OUT -> 状态 IN
-
-    // 第一步：只发命令本体 (16字节长)
-    const cmd = [
-      CMD.DEBUG_COMMAND, DEBUG_CMD.WRITEMEM_32BIT,
-      addr & 0xFF, (addr >> 8) & 0xFF, (addr >> 16) & 0xFF, (addr >> 24) & 0xFF,
-      4, 0,  // len = 4
-      0, 0, 0, 0, 0, 0, 0, 0
-    ];
-    
-    // 第二步：独立的数据传输包 (4字节)
-    const payload = new Uint8Array([
-      value & 0xFF, (value >> 8) & 0xFF, (value >> 16) & 0xFF, (value >> 24) & 0xFF
-    ]);
-
-    // 第三步：主动查询最近读写状态（与 OpenOCD 时序一致）
-    const getRwStatusCmd = new Uint8Array([
-      CMD.DEBUG_COMMAND, DEBUG_CMD.GET_LAST_RW_STATUS,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    ]);
-    
-    try {
-      // 1. 发送命令包
-      const cmdBuf = new Uint8Array(16);
-      cmdBuf.set(cmd.slice(0, 16));
-      let outResult = await this.device.transferOut(this.epOut, cmdBuf);
-      if (outResult.status !== 'ok') throw new Error(`WriteMem32 Cmd transferOut failed: ${outResult.status}`);
-      
-      // 2. 发送独立真实数据
-      outResult = await this.device.transferOut(this.epOut, payload);
-      if (outResult.status !== 'ok') throw new Error(`WriteMem32 Payload transferOut failed: ${outResult.status}`);
-
-      // 3. 发送状态查询命令
-      outResult = await this.device.transferOut(this.epOut, getRwStatusCmd);
-      if (outResult.status !== 'ok') throw new Error(`WriteMem32 GetStatus transferOut failed: ${outResult.status}`);
-
-      // 4. 读取 ST-Link 执行这笔内存写入的状态
-      const r = await Promise.race([
-        this.device.transferIn(this.epIn, 2),
-        new Promise((_, rej) => setTimeout(() => rej(new Error(`writeMem32(0x${addr.toString(16)}) transferIn 超时`)), 500))
-      ]);
-      
-      if (!r.data || r.data.byteLength === 0) {
-        throw new Error('未收到写状态响应');
-      }
-
-      const statusData = new Uint8Array(r.data.buffer, r.data.byteOffset, r.data.byteLength);
-      const ok = statusData[0] === STLINK_STATUS_OK || statusData[0] === 0x80;
-      
-      if (!ok) {
-        console.warn(`writeMem32 failed: ST-Link Status 0x${statusData[0].toString(16).padStart(2,'0')}`);
-      }
-      return ok;
-
-    } catch (e) {
-      console.error(e.message);
-      // 通信破裂保护
-      try {
-        await this.device.clearHalt('in', this.epIn);
-      } catch (_) {}
-      return false;
-    }
-  }
-
   async writeDebugReg32(addr, value) {
     // 使用 APIV2 WRITEDEBUGREG 写调试/外设寄存器
     // 对 Flash 控制寄存器（0x400220xx）比 WRITEMEM_32BIT 更稳定
@@ -1717,12 +1579,10 @@ class STLinkUSB {
     try {
       // 读取状态寄存器
       const sr = await this.readDebugReg32(FLASH_SR);
-      console.log(`Clear Flash Error: 初始 SR=0x${sr.toString(16).padStart(8,'0')}`);
       
       // 检查是否有错误位（通常是 bit[2], [3], [4]）
       const hasError = (sr & 0x1C) !== 0;
       if (!hasError) {
-        console.log(`Clear Flash Error: 无错误状态`);
         return true;
       }
       
@@ -1730,12 +1590,7 @@ class STLinkUSB {
       const errorMask = 0x1C;  // 错误位掩码
       const clearValue = sr | errorMask;  // 在 STM32 Flash SR 中，写 1 清除标志
       
-      console.log(`Clear Flash Error: 清除错误面具 (写 0x${clearValue.toString(16).padStart(8,'0')} 到 FLASH_SR)`);
       await this.writeDebugReg32(FLASH_SR, clearValue);
-      
-      // 验证
-      const srAfter = await this.readDebugReg32(FLASH_SR);
-      console.log(`Clear Flash Error: 清除后 SR=0x${srAfter.toString(16).padStart(8,'0')}`);
       
       return true;
     } catch (e) {
@@ -1764,18 +1619,15 @@ class STLinkUSB {
       if (!halted) throw new Error('core_reset_halt 失败');
 
       // 1. 写 KEY1
-      console.log('Writing KEY1...');
       let ok = await this.writeDebugReg32(FLASH_KEYR, KEY1);
       if (!ok) throw new Error('KEY1 write failed');
       
       // 2. 写 KEY2
-      console.log('Writing KEY2...');
       ok = await this.writeDebugReg32(FLASH_KEYR, KEY2);
       if (!ok) throw new Error('KEY2 write failed');
       
       // 3. 验证：读 FLASH_CR 检查 LOCK 位（bit7）
       const cr = await this.readDebugReg32(FLASH_CR);
-      console.log(`Flash CR: 0x${cr.toString(16).padStart(8,'0')}`);
       
       if ((cr & 0x80) === 0) {
         console.log('✅ Flash unlocked');
@@ -1798,13 +1650,7 @@ class STLinkUSB {
       const cr = await this.readDebugReg32(FLASH_CR);
       const newCR = cr | 0x80;  // Set LOCK bit
       
-      console.log(`Flash Lock: 设置 LOCK 位 (CR: 0x${cr.toString(16).padStart(8,'0')} -> 0x${newCR.toString(16).padStart(8,'0')})`);
       const ok = await this.writeDebugReg32(FLASH_CR, newCR);
-      
-      if (ok) {
-        const crAfter = await this.readDebugReg32(FLASH_CR);
-        console.log(`✓ Flash 已上锁 (CR=0x${crAfter.toString(16).padStart(8,'0')})`);
-      }
       
       return ok;
     } catch (e) {
@@ -1894,70 +1740,6 @@ class STLinkUSB {
     }
   }
 
-  async flashErasePage(pageAddr) {
-    // Erase a single Flash page
-    // For STM32F1/GD32F1: page size is 1KB
-    // Flash CR: bit[1]=PER (Page Erase), bit[6]=STRT (Start)
-    
-    const FLASH_CR = 0x40022010;
-    const FLASH_AR = 0x40022014;
-    const FLASH_SR = 0x4002200C;
-    const FLASH_SR_BSY = 0x01;
-    const FLASH_SR_PGERR_WRPRTERR = 0x14;
-    const FLASH_SR_EOP = 0x20;
-    
-    try {
-      // Step 1: Set PER (Page Erase) bit
-      let cr = await this.readDebugReg32(FLASH_CR);
-      cr |= 0x02;  // PER = 1
-      await this.writeDebugReg32(FLASH_CR, cr);
-      
-      // Step 2: Set target address
-      await this.writeDebugReg32(FLASH_AR, pageAddr);
-      
-      // Step 3: Set STRT (Start) bit
-      cr |= 0x40;  // STRT = 1
-      await this.writeDebugReg32(FLASH_CR, cr);
-      
-      // Step 4: Wait for completion (poll BSY bit) - 最多 5 秒
-      const startTime = Date.now();
-      const maxWait = 5000;
-      let sr = 0;
-      let done = false;
-      while (Date.now() - startTime < maxWait) {
-        sr = await this.readDebugReg32(FLASH_SR);
-        if ((sr & FLASH_SR_BSY) === 0) {  // BSY clear
-          done = true;
-          break;
-        }
-        await new Promise(r => setTimeout(r, 5));
-      }
-
-      if (!done) {
-        throw new Error(`页擦除超时 (SR=0x${sr.toString(16)})`);
-      }
-
-      if ((sr & FLASH_SR_PGERR_WRPRTERR) !== 0) {
-        await this.writeDebugReg32(FLASH_SR, sr | FLASH_SR_PGERR_WRPRTERR).catch(() => {});
-        throw new Error(`页擦除状态异常 SR=0x${sr.toString(16)}`);
-      }
-
-      if ((sr & FLASH_SR_EOP) !== 0) {
-        await this.writeDebugReg32(FLASH_SR, FLASH_SR_EOP).catch(() => {});
-      }
-      
-      // Step 5: Clear PER bit
-      cr = await this.readDebugReg32(FLASH_CR);
-      cr &= ~0x02;  // PER = 0
-      await this.writeDebugReg32(FLASH_CR, cr);
-      
-      return true;
-    } catch (e) {
-      console.warn(`页擦除失败 (0x${pageAddr.toString(16)}): ${e.message}`);
-      return false;
-    }
-  }
-
   async recoverFlashProgrammingState() {
     try {
       await this.haltCoreAndCheck(1500).catch(() => false);
@@ -2023,16 +1805,6 @@ class STLinkUSB {
     let blockData = dataArray.slice(offset, offset + length);
     if (blockData.length === 0) return true;
 
-    const armOnly = PROGRAM_WRITE_MODE === 'arm_only';
-
-    // 一旦 ARM writer 在本次会话中出现超时/异常，后续固定 direct，避免来回切换
-    if (this.armWriterDisabled) {
-      if (armOnly) {
-        throw new Error('ARM writer 已禁用（ARM-only 模式下不允许回退 direct）');
-      }
-      return await this.flashBlockDirect(baseAddr, blockData);
-    }
-
     // WRITEMEM_32BIT 批量写入要求 4 字节对齐（Flash writer 内部使用 halfword）
     const remainder = blockData.length % 4;
     if (remainder !== 0) {
@@ -2042,85 +1814,56 @@ class STLinkUSB {
       blockData = padded;
     }
     
-    try {
-      const FLASH_CR = 0x40022010;
+    const FLASH_CR = 0x40022010;
 
-      // 1. 先加载 ARM Flash 程序到 SRAM (0x20000000)
-      if (!this.armLoaded) {
-        if (!await this.loadFlashWriter()) {
-          console.warn("ARM Flash 程序加载失败");
-          return false;
-        }
-        this.armLoaded = true;
+    // 1. 先加载 ARM Flash 程序到 SRAM (0x20000000)
+    if (!this.armLoaded) {
+      if (!await this.loadFlashWriter()) {
+        throw new Error("ARM Flash 程序加载失败");
       }
-      
-      // 2. 批量写入数据到 SRAM 数据区 (0x20000100)，使用 WRITEMEM_32BIT 大幅减少 USB 往返
-      await this.writeMemBulk32(0x20000100, blockData);
-
-      // 常量/不变寄存器仅首次配置，后续只更新 R1（Flash 目标地址）
-      if (!this.armWriterStaticRegsReady) {
-        await this.setReg(4, 0x4002200C);           // R4: FLASH_SR
-        await this.setReg(5, 0x00000001);           // R5: BSY bit
-        await this.setReg(6, 0x00000020);           // R6: EOP bit
-        await this.setReg(0, 0x20000100);           // R0: 数据源（固定）
-        // 预置 PG 位（一次设置，整个编程周期保持）
-        const cr = await this.readDebugReg32(FLASH_CR);
-        await this.writeDebugReg32(FLASH_CR, cr | 0x01);
-        this.armWriterStaticRegsReady = true;
-        this._lastArmR2 = 0;
-      }
-      
-      // 3. 仅设置每块变化的寄存器（R0/R1/R2/PC 每块必须重设，算法运行后会修改它们）
-      await this.setReg(0, 0x20000100);           // R0: 数据源（算法会递增）
-      await this.setReg(1, baseAddr);             // R1: Flash 目标地址（算法会递增）
-      await this.setReg(2, blockData.length);     // R2: 字节数（算法会递减到 0）
-      await this.setReg(15, 0x20000001);          // PC: 入口点（算法会修改）
-      
-      // 4. 执行 ARM 程序
-      await this.core_run();
-      
-      // 5. 等待 BKPT 信号（超时按固件大小动态调整）
-      const waitTimeoutMs = this.programmingProfile.waitForBreakpointMs || 5000;
-      if (!await this.waitForBreakpoint(waitTimeoutMs)) {
-        try {
-          const dhcsrNow = await this.readMem32(0xE000EDF0);
-          const pcRaw = await this.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.READREG, 15], 8, 1200, true, true);
-          const pcNow = ((pcRaw[3] & 0xFF) << 24) | ((pcRaw[2] & 0xFF) << 16) | ((pcRaw[1] & 0xFF) << 8) | (pcRaw[0] & 0xFF);
-          console.warn(`ARM 超时诊断: DHCSR=0x${(dhcsrNow >>> 0).toString(16).padStart(8,'0')} PC=0x${(pcNow >>> 0).toString(16).padStart(8,'0')}`);
-        } catch (diagErr) {
-          console.warn(`ARM 超时诊断读取失败: ${diagErr.message}`);
-        }
-
-        if (armOnly) {
-          console.warn(`块写入超时(${waitTimeoutMs}ms) (0x${baseAddr.toString(16)})，ARM-only 模式下将直接报错终止`);
-        } else {
-          console.warn(`块写入超时(${waitTimeoutMs}ms) (0x${baseAddr.toString(16)})，回退到 direct 编程...`);
-        }
-        this.armWriterDisabled = true;
-        if (armOnly) {
-          throw new Error(`ARM writer BKPT 超时 (${waitTimeoutMs}ms) @0x${baseAddr.toString(16)}`);
-        }
-        console.warn('ARM writer 已禁用：本次编程剩余块将使用 direct 模式');
-        await this.recoverFlashProgrammingState();
-        return await this.flashBlockDirect(baseAddr, blockData);
-      }
-      
-      return true;
-      
-    } catch (e) {
-      if (armOnly) {
-        console.warn(`块写入失败 (0x${baseAddr.toString(16)}): ${e.message}（ARM-only 模式，不回退）`);
-      } else {
-        console.warn(`块写入失败 (0x${baseAddr.toString(16)}): ${e.message}，回退到 direct 编程...`);
-      }
-      this.armWriterDisabled = true;
-      if (armOnly) {
-        throw e;
-      }
-      console.warn('ARM writer 已禁用：本次编程剩余块将使用 direct 模式');
-      await this.recoverFlashProgrammingState();
-      return await this.flashBlockDirect(baseAddr, blockData);
+      this.armLoaded = true;
     }
+    
+    // 2. 批量写入数据到 SRAM 数据区 (0x20000100)，使用 WRITEMEM_32BIT 大幅减少 USB 往返
+    await this.writeMemBulk32(0x20000100, blockData);
+
+    // 常量/不变寄存器仅首次配置，后续只更新 R1（Flash 目标地址）
+    if (!this.armWriterStaticRegsReady) {
+      await this.setReg(4, 0x4002200C);           // R4: FLASH_SR
+      await this.setReg(5, 0x00000001);           // R5: BSY bit
+      await this.setReg(6, 0x00000020);           // R6: EOP bit
+      await this.setReg(0, 0x20000100);           // R0: 数据源（固定）
+      // 预置 PG 位（一次设置，整个编程周期保持）
+      const cr = await this.readDebugReg32(FLASH_CR);
+      await this.writeDebugReg32(FLASH_CR, cr | 0x01);
+      this.armWriterStaticRegsReady = true;
+      this._lastArmR2 = 0;
+    }
+    
+    // 3. 仅设置每块变化的寄存器（R0/R1/R2/PC 每块必须重设，算法运行后会修改它们）
+    await this.setReg(0, 0x20000100);           // R0: 数据源（算法会递增）
+    await this.setReg(1, baseAddr);             // R1: Flash 目标地址（算法会递增）
+    await this.setReg(2, blockData.length);     // R2: 字节数（算法会递减到 0）
+    await this.setReg(15, 0x20000001);          // PC: 入口点（算法会修改）
+    
+    // 4. 执行 ARM 程序
+    await this.core_run();
+    
+    // 5. 等待 BKPT 信号（超时按固件大小动态调整）
+    const waitTimeoutMs = this.programmingProfile.waitForBreakpointMs || 5000;
+    if (!await this.waitForBreakpoint(waitTimeoutMs)) {
+      try {
+        const dhcsrNow = await this.readMem32(0xE000EDF0);
+        const pcRaw = await this.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.READREG, 15], 8, 1200, true, true);
+        const pcNow = ((pcRaw[3] & 0xFF) << 24) | ((pcRaw[2] & 0xFF) << 16) | ((pcRaw[1] & 0xFF) << 8) | (pcRaw[0] & 0xFF);
+        console.warn(`ARM 超时诊断: DHCSR=0x${(dhcsrNow >>> 0).toString(16).padStart(8,'0')} PC=0x${(pcNow >>> 0).toString(16).padStart(8,'0')}`);
+      } catch (diagErr) {
+        console.warn(`ARM 超时诊断读取失败: ${diagErr.message}`);
+      }
+      throw new Error(`ARM writer BKPT 超时 (${waitTimeoutMs}ms) @0x${baseAddr.toString(16)}`);
+    }
+    
+    return true;
   }
 
   async flashBlockDirect(baseAddr, blockData) {
@@ -2174,19 +1917,6 @@ class STLinkUSB {
     }
   }
 
-  async readIDCODE() {
-    // 尝试用 READREG 寄存器读取方式来读 IDCODE
-    // 注意：在 SWD 模式下，这相当于读取 CoreSight IDCODE 寄存器
-    try {
-      // 方式1：直接通过 READMEM 读取
-      const idcode = await this.readMem32(ARM_IDCODE_ADDR);
-      console.log(`readIDCODE via READMEM: 0x${idcode.toString(16)}`);
-      return idcode;
-    } catch(e) {
-      console.warn(`readIDCODE via READMEM 失败: ${e.message}`);
-      throw e;
-    }
-  }
 }
 
 // ─────────────────────────────────────────
@@ -2878,57 +2608,24 @@ $('btn-program').addEventListener('click', async () => {
     log('────────────────────────────', 'info');
     log(`重启策略: ${verifyEnabled ? '校验通过后重启' : '未启用校验，完成后直接运行'}`, 'info');
     
-    // 清理旧状态
-    log('清理设备状态...', 'info');
+    // 清理旧状态 → 进入 SWD → 设频率
+    log('初始化 SWD 链路...', 'info');
     await stlink.leaveState();
-    await new Promise(r => setTimeout(r, 120));
-    
-    // 进入调试模式
-    log('进入 SWD 调试模式...', 'info');
+    await new Promise(r => setTimeout(r, 20));
     await stlink.enterDebugSWD();
-    
-    // SWD 频率：固定 4MHz
-    log('设置 SWD 频率...', 'info');
     await stlink.setSWDFreq(4000000);  // 4MHz
-    await new Promise(r => setTimeout(r, 80));
+    await new Promise(r => setTimeout(r, 10));
     
-    // OpenOCD 预热策略：USB 通信热启动
-    log('预热 USB 和 SWD 通信...', 'info');
+    // USB 预热（快速验证通信正常）
     try {
-      // 清理端点悬挂数据
-      await stlink.device.clearHalt('in', stlink.epIn);
-      await stlink.device.clearHalt('out', stlink.epOut);
-      
-      // 测试读操作（DHCSR 寄存器）来确保通信正常
-      for (let warmup = 0; warmup < 2; warmup++) {
-        try {
-          const testVal = await stlink.readMem32(0xE000EDF0);  // DHCSR
-          console.log(`USB 预热 #${warmup+1}: OK (DHCSR=0x${testVal.toString(16)})`);
-        } catch (e) {
-          console.warn(`USB 预热 #${warmup+1} 失败，重试...`);
-        }
-        await new Promise(r => setTimeout(r, 20));
-      }
-    } catch (e) {
-      console.warn(`USB 预热异常: ${e.message}`);
-    }
-    await new Promise(r => setTimeout(r, 50));
-    
-    // Halt 芯片并验证
-    log('暂停目标芯片...', 'info');
-    const halted = await stlink.haltCoreAndCheck(1200);
-    if (!halted) {
-      throw new Error('目标内核未进入 HALT 状态');
-    }
-    await new Promise(r => setTimeout(r, 50));
+      await stlink.readMem32(0xE000EDF0);  // DHCSR
+    } catch (_) {}
     
     // 清除 Flash 错误状态
-    log('清除 Flash 错误状态...', 'info');
     await stlink.clearFlashError();
-    await new Promise(r => setTimeout(r, 80));
     
-    // 解锁 Flash
-    log('解锁 Flash 存储器...', 'info');
+    // 解锁 Flash（内部会 reset-halt + 写密钥 + 验证 LOCK 位）
+    log('解锁 Flash...', 'info');
     const unlocked = await stlink.flashUnlock();
     if (!unlocked) {
       showRequiredModal(
@@ -2937,7 +2634,6 @@ $('btn-program').addEventListener('click', async () => {
       );
       throw new Error('Flash 解锁失败，可能是硬件问题或芯片未连接');
     }
-    await new Promise(r => setTimeout(r, 20));
     
     const { segments } = firmwareData;
 
@@ -2984,9 +2680,7 @@ $('btn-program').addEventListener('click', async () => {
       chipFlashKB: detectedFlashSizeKB,
     });
     stlink.armLoaded = false;
-    stlink.armWriterDisabled = false;
     stlink.armWriterStaticRegsReady = false;
-    log(`写入模式: ${PROGRAM_WRITE_MODE === 'arm_only' ? 'ARM-only（不回退）' : 'ARM优先（失败回退direct）'}`, PROGRAM_WRITE_MODE === 'arm_only' ? 'warn' : 'info');
     log(
       `编程超时策略: FW ${(totalSize / 1024).toFixed(1)}KB, Chip ${profile.chipFlashKB || '未知'}KB, write状态 ${profile.writeMem8StatusTimeoutMs}ms, BKPT ${profile.waitForBreakpointMs}ms, 重试 ${profile.writeMem8RetryCount} 次`,
       'info'
@@ -3242,7 +2936,6 @@ $('btn-program').addEventListener('click', async () => {
           stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.RUNCORE], 2),
           new Promise((_, rej) => setTimeout(() => rej(new Error('RUNCORE 超时')), 2000))
         ]);
-        await new Promise(r => setTimeout(r, 500));
       } catch (e) {
         console.warn(`⚠️ RUNCORE 失败但继续: ${e.message}`);
       }
@@ -3266,29 +2959,19 @@ $('btn-program').addEventListener('click', async () => {
     log(`────────────────────────────`, 'err');
     console.error(err);
   } finally {
-    // 清理 - 所有操作都有内置的快速失败超时
-    try {
-      log('上锁 Flash...', 'info');
-      await stlink.flashLock().catch(() => {});
-      
-      // RUNCORE 1.5秒快速失败
-      try {
-        await Promise.race([
-          stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.RUNCORE], 2),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('RUNCORE超时')), 1500))
-        ]);
-      } catch (e) {
-        console.warn(`⚠️ RUNCORE 失败: ${e.message}`);
-      }
-      
-      // leaveState 会按当前模式智能清理（避免重复 EXIT）
-      await stlink.leaveState().catch(() => {});
-    } catch (_) {}
-    
+    // 先立即更新 UI（避免进度条停滞等待后续清理操作）
     programProgressStartTs = 0;
     $('btn-program').disabled = !connected;
     $('progress-program').style.display = 'none';
     updateRedownloadButtonState();
+
+    // 后台清理 — 不阻塞 UI
+    (async () => {
+      try {
+        await stlink.flashLock().catch(() => {});
+        await stlink.leaveState().catch(() => {});
+      } catch (_) {}
+    })();
   }
 });
 
