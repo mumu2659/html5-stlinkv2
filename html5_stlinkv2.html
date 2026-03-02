@@ -180,12 +180,37 @@
     align-items: center;
     gap: 6px;
     font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+  }
+  .panel-title::before {
+    content: '▼';
+    display: inline-block;
+    margin-right: 6px;
+    transition: transform 0.2s;
+    font-size: 0.7rem;
+    color: var(--accent);
+  }
+  .panel.collapsed .panel-title::before {
+    transform: rotate(-90deg);
   }
   .panel-title::after {
     content: '';
     flex: 1;
     height: 1px;
     background: var(--border);
+  }
+
+  .panel-content {
+    transition: opacity 0.2s, max-height 0.2s;
+    max-height: 2000px;
+    overflow: hidden;
+    opacity: 1;
+  }
+  .panel.collapsed .panel-content {
+    max-height: 0;
+    opacity: 0;
   }
 
   .btn {
@@ -422,6 +447,9 @@
   .info-item:nth-child(8) { border-left-color: #b300ff; }
   .info-item:nth-child(9) { border-left-color: var(--accent2); }
   .info-item:nth-child(10) { border-left-color: var(--accent2); }
+  .info-item-wide {
+    grid-column: span 2;
+  }
   .info-key {
     font-size: 0.57rem;
     letter-spacing: 1.5px;
@@ -436,6 +464,25 @@
     color: var(--text);
   }
   .info-val.highlight { color: var(--green); }
+  
+  .info-copy-btn {
+    background: transparent;
+    border: 1px solid rgba(0,229,255,0.3);
+    border-radius: 4px;
+    padding: 8px 14px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+  .info-copy-btn:hover {
+    border-color: var(--accent);
+    background: rgba(0,229,255,0.08);
+    box-shadow: 0 0 8px rgba(0,229,255,0.2);
+  }
+  .info-copy-btn:active {
+    transform: scale(0.95);
+  }
 
   .log-area {
     background: #070910;
@@ -678,7 +725,7 @@
 
   /* 工作流步骤指示器 */
   .workflow-steps {
-    display: flex;
+    display: none;
     gap: 6px;
     max-width: 720px;
     width: 100%;
@@ -731,6 +778,17 @@
     text-align: center;
     min-height: 18px;
     transition: all 0.3s;
+    display: none;
+  }
+
+  /* 隐藏连接配置面板 */
+  #panel-config {
+    display: none;
+  }
+
+  /* 隐藏 Chip ID (UID) 面板 */
+  #panel-chipid {
+    display: none;
   }
 </style>
 </head>
@@ -808,13 +866,13 @@
 
 <!-- 连接前预检提示 -->
 <div id="precaution-bar" style="
-  width:100%; max-width:760px;
+  width:100%; max-width:720px;
   background: rgba(255,214,0,0.06);
   border: 1px solid rgba(255,214,0,0.25);
   border-radius:8px;
   padding: 10px 16px;
   margin-bottom: 12px;
-  display:flex;
+  display:none;
   align-items:flex-start;
   gap:10px;
   font-family:'Share Tech Mono',monospace;
@@ -861,149 +919,152 @@
 
 <div class="main-grid">
   <!-- 配置 -->
-  <div class="panel">
+  <div class="panel collapsed" id="panel-config">
     <div class="panel-title">连接配置</div>
-    <div class="field-group">
-      <div class="field-label">目标接口</div>
-      <select id="sel-interface">
-        <option value="swd">SWD (Serial Wire Debug)</option>
-        <option value="jtag">JTAG</option>
-      </select>
-    </div>
-    <div class="field-group">
-      <div class="field-label">SWD 频率 (kHz)</div>
-      <select id="sel-freq">
-        <option value="4000" selected>4000</option>
-        <option value="1800">1800</option>
-        <option value="900">900</option>
-        <option value="400">400</option>
-        <option value="125">125</option>
-      </select>
-    </div>
-    <div class="field-group">
-      <div class="field-label">目标电压</div>
-      <select id="sel-voltage">
-        <option value="3.3">3.3V</option>
-        <option value="1.8">1.8V</option>
-        <option value="auto" selected>Auto Detect</option>
-      </select>
-    </div>
-    <button class="btn btn-primary" id="btn-read" disabled>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-      读取 Chip ID
-    </button>
-    <div class="progress-bar-wrap" id="progress-wrap">
-      <div class="progress-bar indeterminate" id="progress-bar"></div>
+    <div class="panel-content">
+      <div class="field-group">
+        <div class="field-label">目标接口</div>
+        <select id="sel-interface">
+          <option value="swd">SWD (Serial Wire Debug)</option>
+          <option value="jtag">JTAG</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <div class="field-label">SWD 频率 (kHz)</div>
+        <select id="sel-freq">
+          <option value="4000" selected>4000</option>
+          <option value="1800">1800</option>
+          <option value="900">900</option>
+          <option value="400">400</option>
+          <option value="125">125</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <div class="field-label">目标电压</div>
+        <select id="sel-voltage">
+          <option value="3.3">3.3V</option>
+          <option value="1.8">1.8V</option>
+          <option value="auto" selected>Auto Detect</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" id="btn-read" disabled>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        读取 Chip ID
+      </button>
+      <div class="progress-bar-wrap" id="progress-wrap">
+        <div class="progress-bar indeterminate" id="progress-bar"></div>
+      </div>
     </div>
   </div>
 
   <!-- Chip ID 显示 -->
-  <div class="panel">
+  <div class="panel collapsed" id="panel-chipid">
     <div class="panel-title">Chip ID (UID)</div>
-    <div class="chip-id-display empty" id="chip-id-display">-- 等待读取 --</div>
-    <div class="uid-bytes" id="uid-bytes"></div>
-    <div class="row-btns">
-      <button class="btn btn-secondary" id="btn-copy" disabled>复制</button>
-      <button class="btn btn-secondary" id="btn-clear">清除</button>
+    <div class="panel-content">
+      <div class="chip-id-display empty" id="chip-id-display">-- 等待读取 --</div>
+      <div class="uid-bytes" id="uid-bytes"></div>
+      <div class="row-btns">
+        <button class="btn btn-secondary" id="btn-copy" disabled>复制</button>
+        <button class="btn btn-secondary" id="btn-clear">清除</button>
+      </div>
+      <div class="connect-hint" id="chip-hint" style="margin-top:12px">连接设备后点击"读取 Chip ID"</div>
     </div>
-    <div class="connect-hint" id="chip-hint" style="margin-top:12px">连接设备后点击"读取 Chip ID"</div>
   </div>
 
   <!-- 芯片信息 -->
-  <div class="panel wide" id="panel-info">
+  <div class="panel wide collapsed" id="panel-info">
     <div class="panel-title">芯片信息</div>
-    <div class="info-grid" id="info-grid">
-      <div class="info-item"><div class="info-key">型号</div><div class="info-val" id="info-model">—</div></div>
-      <div class="info-item"><div class="info-key">内核</div><div class="info-val" id="info-core">—</div></div>
-      <div class="info-item"><div class="info-key">Flash 大小</div><div class="info-val" id="info-flash">—</div></div>
-      <div class="info-item"><div class="info-key">SRAM 大小</div><div class="info-val" id="info-sram">—</div></div>
-      <div class="info-item"><div class="info-key">厂商</div><div class="info-val" id="info-mfr">—</div></div>
-      <div class="info-item"><div class="info-key">IDCODE</div><div class="info-val highlight" id="info-idcode">—</div></div>
-      <div class="info-item"><div class="info-key">DEV_ID</div><div class="info-val" id="info-devid">—</div></div>
-      <div class="info-item"><div class="info-key">REV_ID</div><div class="info-val" id="info-rev">—</div></div>
-      <div class="info-item"><div class="info-key">目标电压</div><div class="info-val highlight" id="info-vdd">—</div></div>
-      <div class="info-item"><div class="info-key">ST-Link 版本</div><div class="info-val" id="info-stlink">—</div></div>
+    <div class="panel-content">
+      <div class="info-grid" id="info-grid">
+        <div class="info-item"><div class="info-key">型号</div><div class="info-val" id="info-model">—</div></div>
+        <div class="info-item"><div class="info-key">内核</div><div class="info-val" id="info-core">—</div></div>
+        <div class="info-item"><div class="info-key">Flash 大小</div><div class="info-val" id="info-flash">—</div></div>
+        <div class="info-item"><div class="info-key">SRAM 大小</div><div class="info-val" id="info-sram">—</div></div>
+        <div class="info-item"><div class="info-key">厂商</div><div class="info-val" id="info-mfr">—</div></div>
+        <div class="info-item"><div class="info-key">IDCODE</div><div class="info-val highlight" id="info-idcode">—</div></div>
+        <div class="info-item"><div class="info-key">DEV_ID</div><div class="info-val" id="info-devid">—</div></div>
+        <div class="info-item"><div class="info-key">REV_ID</div><div class="info-val" id="info-rev">—</div></div>
+        <div class="info-item"><div class="info-key">目标电压</div><div class="info-val highlight" id="info-vdd">—</div></div>
+        <div class="info-item"><div class="info-key">ST-Link 版本</div><div class="info-val" id="info-stlink">—</div></div>
+        <div class="info-item info-item-wide"><div class="info-key">Chip ID (UID)</div><div style="display:flex;align-items:center;gap:8px;flex:1"><div class="info-val highlight" id="info-chipid" style="flex:1;font-size:clamp(0.9rem,4vw,1.15rem);word-break:break-all">—</div><button id="btn-info-chipid-copy" class="info-copy-btn" title="复制" style="display:none;cursor:pointer" aria-label="Copy Chip ID">📋</button></div></div>
+      </div>
     </div>
   </div>
 
   <!-- 固件编程 -->
   <div class="panel wide" id="panel-program">
     <div class="panel-title">固件编程</div>
-    <div class="field-group">
-      <div class="field-label">固件文件</div>
-      <div style="display:flex; gap:8px; align-items:center">
-        <button class="btn btn-primary" id="btn-file-pick" disabled style="width:auto; min-width:128px; justify-content:center">
-          选择文件
-        </button>
-        <input type="file" id="file-input" class="hidden-file-input" accept=".hex,.bin" disabled>
-        <span id="file-info" style="color:var(--dim); font-size:0.8rem; min-width:120px"></span>
-      </div>
-    </div>
-
-    <div class="field-group" id="bin-addr-group" style="display:none">
-      <div class="field-label">BIN 烧写起始地址</div>
-      <input type="text" id="bin-base-addr" value="0x08000000" placeholder="例如: 0x08000000" style="width:100%; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:5px; color:var(--text); font-family:'Share Tech Mono', monospace; font-size:0.85rem; padding:8px 10px; outline:none; transition:border-color 0.2s;">
-      <div style="margin-top:6px; font-size:0.75rem; color:var(--dim); font-family:monospace">仅对 .bin 生效；.hex 将使用文件内地址</div>
-    </div>
-    
-    <div class="field-group">
-      <div class="field-label">固件信息</div>
-      <div style="background:var(--panel); padding:10px; border-radius:4px; border-left:3px solid var(--accent); font-family:monospace; font-size:0.8rem; color:var(--dim)">
-        <div id="file-stats" style="min-height:60px"></div>
-      </div>
-    </div>
-    
-    <div class="field-group">
-      <div class="field-label">编程选项</div>
-      <label style="display:flex; align-items:center; gap:8px; margin-bottom:8px; cursor:pointer">
-        <input type="checkbox" id="opt-verify" checked style="width:16px; height:16px; cursor:pointer">
-        <span id="opt-verify-label">编程后验证</span>
-      </label>
-      <label style="display:flex; align-items:center; gap:8px; cursor:pointer">
-        <input type="checkbox" id="opt-erase-all" style="width:16px; height:16px; cursor:pointer">
-        <span id="opt-erase-label">编程前全片擦除（不推荐，较慢）</span>
-      </label>
-    </div>
-    
-    <div class="field-group">
-      <div style="display:flex; gap:8px; align-items:stretch">
-        <button class="btn btn-primary" id="btn-program" disabled style="flex:1">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 19.5c-1 0-1.5.5-2 1m4-10v10m4-10v10m-8-14h8a2 2 0 0 1 2 2v2H6v-2a2 2 0 0 1 2-2z"/></svg>
-          开始下载
-        </button>
-        <button class="btn btn-secondary" id="btn-redownload" disabled style="white-space:nowrap">
-          再次下载
-        </button>
-      </div>
-    </div>
-
-    <div class="field-group" style="margin-top:-4px; margin-bottom:10px;">
-      <div style="font-family:'Share Tech Mono', monospace; font-size:0.78rem; color:var(--dim);">
-        <span id="program-elapsed-label"></span><span id="program-last-time" style="color:var(--text)">--</span>
-      </div>
-    </div>
-    
-    <div class="progress-section" id="progress-program" style="display:none; margin-top:16px">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
-        <span id="progress-step">准备中...</span>
-        <div style="display:flex; gap:10px; align-items:center">
-          <span id="progress-eta" style="font-family:'Share Tech Mono', monospace; color:var(--dim); font-size:0.78rem; min-width:86px; text-align:right">ETA --</span>
-          <span id="progress-percent">0%</span>
+    <div class="panel-content">
+      <div class="field-group">
+        <div class="field-label">固件文件</div>
+        <div style="display:flex; gap:8px; align-items:center">
+          <button class="btn btn-primary" id="btn-file-pick" disabled style="width:auto; min-width:128px; justify-content:center">
+            选择文件
+          </button>
+          <input type="file" id="file-input" class="hidden-file-input" accept=".hex,.bin" disabled>
+          <span id="file-info" style="color:var(--dim); font-size:0.8rem; min-width:120px"></span>
         </div>
       </div>
-      <div class="program-progress-track">
-        <div class="progress-bar" id="progress-bar-program"></div>
+
+      <div class="field-group" id="bin-addr-group" style="display:none">
+        <div class="field-label">BIN 烧写起始地址</div>
+        <input type="text" id="bin-base-addr" value="0x08000000" placeholder="例如: 0x08000000" style="width:100%; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:5px; color:var(--text); font-family:'Share Tech Mono', monospace; font-size:0.85rem; padding:8px 10px; outline:none; transition:border-color 0.2s;">
+        <div style="margin-top:6px; font-size:0.75rem; color:var(--dim); font-family:monospace">仅对 .bin 生效；.hex 将使用文件内地址</div>
       </div>
-      <div id="progress-detail" style="font-size:0.75rem; color:var(--dim); margin-top:6px; font-family:monospace">0 / 0 bytes</div>
+      
+      <div class="field-group">
+        <div class="field-label">固件信息</div>
+        <div style="background:var(--panel); padding:10px; border-radius:4px; border-left:3px solid var(--accent); font-family:monospace; font-size:0.8rem; color:var(--dim)">
+          <div id="file-stats"></div>
+        </div>
+      </div>
+      
+      <!-- 编程选项（必选，不显示） -->
+      <input type="checkbox" id="opt-verify" checked style="display:none">
+      <input type="checkbox" id="opt-erase-all" checked style="display:none">
+      
+      <div class="field-group">
+        <div style="display:flex; gap:8px; align-items:stretch">
+          <button class="btn btn-primary" id="btn-program" disabled style="flex:1">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 19.5c-1 0-1.5.5-2 1m4-10v10m4-10v10m-8-14h8a2 2 0 0 1 2 2v2H6v-2a2 2 0 0 1 2-2z"/></svg>
+            开始下载
+          </button>
+          <button class="btn btn-secondary" id="btn-redownload" disabled style="white-space:nowrap">
+            再次下载
+          </button>
+        </div>
+      </div>
+
+      <div class="field-group" style="margin-top:-4px; margin-bottom:10px;">
+        <div style="font-family:'Share Tech Mono', monospace; font-size:0.78rem; color:var(--dim);">
+          <span id="program-elapsed-label"></span><span id="program-last-time" style="color:var(--text)">--</span>
+        </div>
+      </div>
+      
+      <div class="progress-section" id="progress-program" style="display:none; margin-top:16px">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
+          <span id="progress-step">准备中...</span>
+          <div style="display:flex; gap:10px; align-items:center">
+            <span id="progress-eta" style="font-family:'Share Tech Mono', monospace; color:var(--dim); font-size:0.78rem; min-width:86px; text-align:right">ETA --</span>
+            <span id="progress-percent">0%</span>
+          </div>
+        </div>
+        <div class="program-progress-track">
+          <div class="progress-bar" id="progress-bar-program"></div>
+        </div>
+        <div id="progress-detail" style="font-size:0.75rem; color:var(--dim); margin-top:6px; font-family:monospace">0 / 0 bytes</div>
+      </div>
     </div>
   </div>
 
   <!-- 日志 -->
-  <div class="panel wide">
+  <div class="panel wide collapsed" id="panel-log">
     <div class="panel-title">操作日志</div>
-    <div class="log-area" id="log"></div>
-    <div class="row-btns">
-      <button class="btn btn-secondary" id="btn-clear-log">清除日志</button>
+    <div class="panel-content">
+      <div class="log-area" id="log"></div>
+      <div class="row-btns">
+        <button class="btn btn-secondary" id="btn-clear-log">清除日志</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1348,6 +1409,7 @@ const updateUILanguage = () => {
   if ($('btn-program')) $('btn-program').textContent = tr('btn.program');
   if ($('btn-redownload')) $('btn-redownload').textContent = tr('btn.redownload');
   if ($('btn-clear-log')) $('btn-clear-log').textContent = tr('btn.clear-log');
+  if ($('btn-info-chipid-copy')) $('btn-info-chipid-copy').title = tr('btn.copy');
   
   // 更新面板标题和标签
   document.querySelectorAll('.panel-title').forEach((el, i) => {
@@ -2555,6 +2617,7 @@ function inferF1SramKB(flashKB) {
 // ─────────────────────────────────────────
 const stlink = new STLinkUSB();
 let connected = false;
+let showPrecautionBar = true; // 控制连接前提示面板的显示
 
 const $  = id => document.getElementById(id);
 
@@ -2580,8 +2643,22 @@ if ($('lang-toggle')) {
   $('lang-toggle').addEventListener('click', () => {
     const newLang = currentLang === 'zh' ? 'en' : 'zh';
     setLanguage(newLang);
+    // 语言切换后刷新页面
+    setTimeout(() => {
+      location.reload();
+    }, 100);
   });
 }
+
+// 面板折叠/展开事件
+document.querySelectorAll('.panel-title').forEach(title => {
+  title.addEventListener('click', (e) => {
+    const panel = title.closest('.panel');
+    if (panel) {
+      panel.classList.toggle('collapsed');
+    }
+  });
+});
 
 const log = (msg, cls = '') => {
   const el = document.createElement('div');
@@ -2989,7 +3066,12 @@ const resetChipInfoPanel = () => {
   $('uid-bytes').innerHTML = '';
   $('btn-copy').disabled = true;
   $('chip-hint').textContent = tr('chip.hint');
-  ['info-model','info-core','info-flash','info-sram','info-idcode','info-rev','info-devid','info-mfr'].forEach(id => $(id).textContent = '—');
+  ['info-model','info-core','info-flash','info-sram','info-idcode','info-rev','info-devid','info-mfr','info-chipid'].forEach(id => $(id).textContent = '—');
+  // 隐藏 Chip ID 复制按钮
+  const infoCopyBtn = $('btn-info-chipid-copy');
+  if (infoCopyBtn) {
+    infoCopyBtn.style.display = 'none';
+  }
 };
 
 const resetProgramProgressUI = () => {
@@ -3760,11 +3842,20 @@ $('btn-connect').addEventListener('click', async () => {
 
     updateWorkflow(2, `📋 ${tr('guidance.step2')}`);
 
+    // 连接成功，隐藏提示面板
+    $('precaution-bar').style.display = 'none';
+
     $('btn-connect').style.display = 'none';
     $('btn-disconnect').style.display = 'inline-flex';
     $('btn-read').disabled = false;
     updateFirmwareFileInputState();
     updateConnectButtonHighlight();
+
+    // 连接成功后自动读取 Chip ID
+    log('──── 自动开始读取 Chip ID ────', 'info');
+    setTimeout(() => {
+      $('btn-read').click();
+    }, 300);
 
   } catch(e) {
     setStatus(tr('log.conn.error.generic'), 'error');
@@ -3776,6 +3867,8 @@ $('btn-connect').addEventListener('click', async () => {
     log(`⬜ 检查 SWD 接线：SWDIO(1) SWCLK(2) GND(3) VDD(4)`, 'warn');
     log(`⬜ 确认目标芯片供电（3.3V 或 1.8V）`, 'warn');
     log(`⬜ 尝试降低 SWD 频率至 125 kHz`, 'warn');
+    // 连接失败，显示提示面板
+    $('precaution-bar').style.display = 'flex';
   } finally {
     updateRedownloadButtonState();
     updateConnectButtonHighlight();
@@ -3798,6 +3891,8 @@ $('btn-disconnect').addEventListener('click', async () => {
   $('btn-program').disabled = true;
   updateRedownloadButtonState();
   updateConnectButtonHighlight();
+  // 断开连接，显示提示面板
+  $('precaution-bar').style.display = 'flex';
   log(tr('log.disco'), 'warn');
 });
 
@@ -4230,6 +4325,30 @@ $('btn-read').addEventListener('click', async () => {
     const disp = $('chip-id-display');
     disp.classList.remove('empty');
     disp.textContent = uidFmt;
+    
+    // 同时更新芯片信息面板中的 Chip ID 显示
+    if ($('info-chipid')) {
+      $('info-chipid').textContent = uidFmt;
+      // 显示复制按钮并添加事件监听
+      const copyBtn = $('btn-info-chipid-copy');
+      if (copyBtn) {
+        copyBtn.style.display = 'inline-block';
+        copyBtn.onclick = (e) => {
+          e.stopPropagation();
+          navigator.clipboard.writeText(uidFmt).then(() => {
+            // 视觉反馈：按钮闪光
+            const origText = copyBtn.textContent;
+            copyBtn.textContent = '✓';
+            copyBtn.style.color = 'var(--green)';
+            setTimeout(() => {
+              copyBtn.textContent = origText;
+              copyBtn.style.color = '';
+            }, 800);
+            log('Chip ID 已复制到剪贴板', 'ok');
+          });
+        };
+      }
+    }
 
     const bytesEl = $('uid-bytes');
     bytesEl.innerHTML = '';
