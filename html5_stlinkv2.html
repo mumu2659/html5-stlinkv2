@@ -211,6 +211,71 @@
     padding: 7px 14px;
   }
   .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-secondary:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .btn-secondary:disabled:hover {
+    border-color: var(--border);
+    color: var(--text);
+  }
+
+  #btn-redownload {
+    background: var(--yellow);
+    color: #000;
+    border: none;
+    font-weight: 700;
+  }
+  #btn-redownload:hover {
+    box-shadow: 0 0 16px rgba(255,214,0,0.45);
+    filter: brightness(1.03);
+  }
+  #btn-redownload:active {
+    filter: brightness(0.96);
+  }
+  #btn-redownload:disabled,
+  #btn-redownload:disabled:hover {
+    box-shadow: none;
+    filter: none;
+  }
+
+  @keyframes connectAttentionPulse {
+    0% {
+      box-shadow: 0 0 0 0 rgba(0,229,255,0.35), 0 0 0 rgba(0,229,255,0.0);
+    }
+    70% {
+      box-shadow: 0 0 0 8px rgba(0,229,255,0.0), 0 0 18px rgba(0,229,255,0.45);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(0,229,255,0.0), 0 0 6px rgba(0,229,255,0.2);
+    }
+  }
+
+  #btn-connect.connect-attention {
+    border-color: var(--accent);
+    color: var(--accent);
+    animation: connectAttentionPulse 1.5s ease-out infinite;
+  }
+  #btn-connect.connect-attention:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 20px rgba(0,229,255,0.45);
+  }
+  #btn-connect.connect-attention:disabled {
+    animation: none;
+    box-shadow: none;
+  }
+
+  #btn-connect,
+  #btn-disconnect {
+    font-size: 0.92rem;
+    letter-spacing: 2px;
+    padding: 10px 18px;
+    min-width: 116px;
+    justify-content: center;
+  }
 
   .btn-danger {
     background: transparent;
@@ -253,6 +318,10 @@
     appearance: none;
   }
   select:focus, input[type="number"]:focus { border-color: var(--accent); }
+
+  .hidden-file-input {
+    display: none;
+  }
 
   .chip-id-display {
     font-family: 'Share Tech Mono', monospace;
@@ -624,7 +693,7 @@
 <div class="status-bar">
   <div class="status-dot" id="status-dot"></div>
   <span id="status-text">未连接 ST-Link 设备</span>
-  <button class="btn btn-secondary" id="btn-connect" style="margin-left:auto; flex-shrink:0">连接设备</button>
+  <button class="btn btn-secondary" id="btn-connect" style="margin-left:auto; flex-shrink:0">连接产品</button>
   <button class="btn btn-danger" id="btn-disconnect" style="display:none; flex-shrink:0">断开</button>
 </div>
 
@@ -699,7 +768,10 @@
     <div class="field-group">
       <div class="field-label">固件文件</div>
       <div style="display:flex; gap:8px; align-items:center">
-        <input type="file" id="file-input" accept=".hex,.bin" style="flex:1; padding:8px; background:var(--panel); border:1px solid var(--border); border-radius:4px; color:var(--text); font-family:monospace; font-size:0.85rem">
+        <button class="btn btn-primary" id="btn-file-pick" disabled style="width:auto; min-width:128px; justify-content:center">
+          选择文件
+        </button>
+        <input type="file" id="file-input" class="hidden-file-input" accept=".hex,.bin" disabled>
         <span id="file-info" style="color:var(--dim); font-size:0.8rem; min-width:120px">未选择</span>
       </div>
     </div>
@@ -730,10 +802,15 @@
     </div>
     
     <div class="field-group">
-      <button class="btn btn-primary" id="btn-program" disabled style="width:100%">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 19.5c-1 0-1.5.5-2 1m4-10v10m4-10v10m-8-14h8a2 2 0 0 1 2 2v2H6v-2a2 2 0 0 1 2-2z"/></svg>
-        开始编程
-      </button>
+      <div style="display:flex; gap:8px; align-items:stretch">
+        <button class="btn btn-primary" id="btn-program" disabled style="flex:1">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 19.5c-1 0-1.5.5-2 1m4-10v10m4-10v10m-8-14h8a2 2 0 0 1 2 2v2H6v-2a2 2 0 0 1 2-2z"/></svg>
+          开始下载
+        </button>
+        <button class="btn btn-secondary" id="btn-redownload" disabled style="white-space:nowrap">
+          再次下载
+        </button>
+      </div>
     </div>
 
     <div class="field-group" style="margin-top:-4px; margin-bottom:10px;">
@@ -2042,6 +2119,9 @@ const setBusy = (on) => {
   const pw = $('progress-wrap');
   on ? pw.classList.add('show') : pw.classList.remove('show');
   $('btn-read').disabled = on || !connected;
+  if (typeof updateRedownloadButtonState === 'function') {
+    updateRedownloadButtonState();
+  }
 };
 
 const REQUIRED_MODAL_COPY = {
@@ -2104,14 +2184,28 @@ function applyRequirementBlockUI(failures) {
   $('btn-connect').disabled = true;
   $('btn-read').disabled = true;
   $('btn-program').disabled = true;
+  if ($('btn-redownload')) $('btn-redownload').disabled = true;
   $('not-supported').style.display = 'block';
   $('not-supported').textContent = `⚠ ${failures.join(' ')}`;
   setStatus('运行条件不满足', 'error');
+  updateConnectButtonHighlight();
+}
+
+function updateConnectButtonHighlight() {
+  const btn = $('btn-connect');
+  if (!btn) return;
+  const runtimeReady = getRequirementFailures().length === 0;
+  const visible = btn.style.display !== 'none';
+  const shouldHighlight = runtimeReady && !connected && visible && !btn.disabled;
+  btn.classList.toggle('connect-attention', shouldHighlight);
 }
 
 function checkRuntimeRequirements({ showModal = false } = {}) {
   const failures = getRequirementFailures();
-  if (failures.length === 0) return true;
+  if (failures.length === 0) {
+    updateConnectButtonHighlight();
+    return true;
+  }
 
   applyRequirementBlockUI(failures);
   failures.forEach(msg => log(`✗ 必备条件失败: ${msg}`, 'err'));
@@ -2132,6 +2226,7 @@ if (!checkRuntimeRequirements({ showModal: true })) {
 } else {
   log('WebUSB API 就绪，请连接 ST-Link 设备', 'info');
 }
+updateConnectButtonHighlight();
 
 // ── 弹窗控制 ──
 function showConflictModal() {
@@ -2238,12 +2333,94 @@ class HexParser {
 let firmwareData = null;
 let firmwareInfo = { size: 0, format: '', segments: 0, addrRange: '' };
 let firmwareFileExt = '';
+let firmwareFileName = '';
 let rawBinData = null;
+let lastFirmwareSnapshot = null;
+let redownloadFlowBusy = false;
+let hasStartedDownloadOnce = false;
 let programProgressStartTs = 0;
 let detectedFlashSizeKB = 0;
 
 const FLASH_BASE_ADDR = 0x08000000;
 const DEFAULT_FLASH_SIZE_KB = 512;
+
+const cloneSegments = (segments = []) => segments.map(seg => ({
+  addr: seg.addr >>> 0,
+  data: new Uint8Array(seg.data)
+}));
+
+const saveLastFirmwareSnapshot = (sourceName = '') => {
+  if (!firmwareData || !Array.isArray(firmwareData.segments) || firmwareData.segments.length === 0) return;
+
+  lastFirmwareSnapshot = {
+    sourceName: sourceName || (lastFirmwareSnapshot?.sourceName || ''),
+    firmwareFileName: firmwareFileName || sourceName || '',
+    firmwareFileExt,
+    firmwareInfo: { ...firmwareInfo },
+    firmwareData: {
+      segments: cloneSegments(firmwareData.segments),
+      totalSize: firmwareData.totalSize >>> 0,
+    },
+    rawBinData: rawBinData instanceof Uint8Array ? new Uint8Array(rawBinData) : null,
+    binBaseAddr: String($('bin-base-addr').value || '').trim() || '0x08000000',
+  };
+};
+
+const restoreLastFirmwareSnapshot = () => {
+  if (!lastFirmwareSnapshot || !lastFirmwareSnapshot.firmwareData) {
+    return false;
+  }
+
+  firmwareFileExt = lastFirmwareSnapshot.firmwareFileExt || '';
+  firmwareFileName = lastFirmwareSnapshot.firmwareFileName || lastFirmwareSnapshot.sourceName || '';
+  firmwareInfo = { ...lastFirmwareSnapshot.firmwareInfo };
+  rawBinData = lastFirmwareSnapshot.rawBinData instanceof Uint8Array
+    ? new Uint8Array(lastFirmwareSnapshot.rawBinData)
+    : null;
+  $('bin-base-addr').value = lastFirmwareSnapshot.binBaseAddr || '0x08000000';
+  firmwareData = {
+    segments: cloneSegments(lastFirmwareSnapshot.firmwareData.segments || []),
+    totalSize: lastFirmwareSnapshot.firmwareData.totalSize >>> 0,
+  };
+  updateFileInfo();
+  log(`✓ 已自动恢复上次固件${lastFirmwareSnapshot.sourceName ? `: ${lastFirmwareSnapshot.sourceName}` : ''}`, 'ok');
+  return true;
+};
+
+const updateRedownloadButtonState = () => {
+  const btn = $('btn-redownload');
+  if (!btn) return;
+  const runtimeReady = getRequirementFailures().length === 0;
+  const hasSnapshot = !!(lastFirmwareSnapshot && lastFirmwareSnapshot.firmwareData);
+  const hasDownloadRecord = hasStartedDownloadOnce;
+  const readBusy = $('progress-wrap').classList.contains('show');
+  const programBusy = $('progress-program').style.display !== 'none';
+  const allowed = runtimeReady && hasSnapshot && hasDownloadRecord && !redownloadFlowBusy && !readBusy && !programBusy;
+  btn.disabled = !allowed;
+};
+
+const updateFirmwareFileInputState = () => {
+  const fileInput = $('file-input');
+  const filePickBtn = $('btn-file-pick');
+  const shouldDisable = !connected || redownloadFlowBusy;
+  if (fileInput) {
+    fileInput.disabled = shouldDisable;
+  }
+  if (filePickBtn) {
+    filePickBtn.disabled = shouldDisable;
+  }
+};
+
+const waitForCondition = async (predicate, timeoutMs, intervalMs = 80) => {
+  const start = Date.now();
+  while ((Date.now() - start) < timeoutMs) {
+    try {
+      if (predicate()) return true;
+    } catch (_) {}
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return false;
+};
 
 const parseAddress = (input) => {
   const normalized = String(input || '').trim();
@@ -2276,11 +2453,14 @@ const applyBinFirmwareData = () => {
 };
 
 const updateFileInfo = () => {
+  updateFirmwareFileInputState();
   $('bin-addr-group').style.display = firmwareFileExt === 'bin' ? 'block' : 'none';
 
   if (!firmwareData) {
     $('file-info').textContent = '未选择';
     $('file-stats').textContent = '-- 未加载固件 --';
+    $('btn-program').disabled = true;
+    updateRedownloadButtonState();
     return;
   }
   
@@ -2302,8 +2482,10 @@ const updateFileInfo = () => {
   `.trim().split('\n').map(s => s.trim()).join('\n');
   
   $('file-stats').textContent = stats;
-  $('file-info').textContent = `✓ 已加载 (${sizeKB} KB)`;
+  const shownName = firmwareFileName || lastFirmwareSnapshot?.sourceName || '未命名固件';
+  $('file-info').textContent = `✓ ${shownName} (${sizeKB} KB)`;
   $('btn-program').disabled = !connected;
+  updateRedownloadButtonState();
 };
 
 const resetChipInfoPanel = () => {
@@ -2332,6 +2514,7 @@ const resetProgramProgressUI = () => {
 const resetFirmwareUI = ({ clearFileInput = false } = {}) => {
   firmwareData = null;
   firmwareFileExt = '';
+  firmwareFileName = '';
   rawBinData = null;
   firmwareInfo = { size: 0, format: '', segments: 0, addrRange: '' };
   if (clearFileInput) {
@@ -2339,6 +2522,7 @@ const resetFirmwareUI = ({ clearFileInput = false } = {}) => {
   }
   updateFileInfo();
   resetProgramProgressUI();
+  updateRedownloadButtonState();
 };
 
 $('file-input').addEventListener('change', async (e) => {
@@ -2347,12 +2531,14 @@ $('file-input').addEventListener('change', async (e) => {
     firmwareData = null;
     rawBinData = null;
     firmwareFileExt = '';
+    firmwareFileName = '';
     updateFileInfo();
     return;
   }
   
   try {
     const lowerName = file.name.toLowerCase();
+    firmwareFileName = file.name;
     
     if (lowerName.endsWith('.hex')) {
       const content = await file.text();
@@ -2360,10 +2546,12 @@ $('file-input').addEventListener('change', async (e) => {
       firmwareInfo.format = 'Intel HEX';
       firmwareFileExt = 'hex';
       rawBinData = null;
+      saveLastFirmwareSnapshot(file.name);
     } else if (lowerName.endsWith('.bin')) {
       rawBinData = new Uint8Array(await file.arrayBuffer());
       firmwareFileExt = 'bin';
       applyBinFirmwareData();
+      saveLastFirmwareSnapshot(file.name);
     } else {
       throw new Error('不支持的文件格式（需要 .hex 或 .bin）');
     }
@@ -2375,8 +2563,14 @@ $('file-input').addEventListener('change', async (e) => {
     firmwareData = null;
     rawBinData = null;
     firmwareFileExt = '';
+    firmwareFileName = '';
     updateFileInfo();
   }
+});
+
+$('btn-file-pick').addEventListener('click', () => {
+  if (!connected || $('btn-file-pick').disabled) return;
+  $('file-input').click();
 });
 
 $('bin-base-addr').addEventListener('change', () => {
@@ -2384,6 +2578,7 @@ $('bin-base-addr').addEventListener('change', () => {
   try {
     applyBinFirmwareData();
     updateFileInfo();
+    saveLastFirmwareSnapshot(lastFirmwareSnapshot?.sourceName || '');
     const base = firmwareData.segments[0].addr;
     log(`✓ BIN 起始地址已更新: 0x${base.toString(16).toUpperCase().padStart(8, '0')}`, 'ok');
   } catch (err) {
@@ -2499,9 +2694,13 @@ $('btn-program').addEventListener('click', async () => {
     log('✗ 未连接或未加载固件', 'err');
     return;
   }
+
+  hasStartedDownloadOnce = true;
+  updateRedownloadButtonState();
   
   $('btn-program').disabled = true;
   $('progress-program').style.display = 'block';
+  updateRedownloadButtonState();
   $('progress-bar-program').classList.remove('done', 'error');
   const runStartTs = Date.now();
   programProgressStartTs = runStartTs;
@@ -2922,6 +3121,7 @@ $('btn-program').addEventListener('click', async () => {
     programProgressStartTs = 0;
     $('btn-program').disabled = !connected;
     $('progress-program').style.display = 'none';
+    updateRedownloadButtonState();
   }
 });
 
@@ -3092,6 +3292,8 @@ $('btn-connect').addEventListener('click', async () => {
     $('btn-connect').style.display = 'none';
     $('btn-disconnect').style.display = 'inline-flex';
     $('btn-read').disabled = false;
+    updateFirmwareFileInputState();
+    updateConnectButtonHighlight();
 
   } catch(e) {
     setStatus('连接失败', 'error');
@@ -3103,12 +3305,16 @@ $('btn-connect').addEventListener('click', async () => {
     log(`⬜ 检查 SWD 接线：SWDIO(1) SWCLK(2) GND(3) VDD(4)`, 'warn');
     log(`⬜ 确认目标芯片供电（3.3V 或 1.8V）`, 'warn');
     log(`⬜ 尝试降低 SWD 频率至 125 kHz`, 'warn');
+  } finally {
+    updateRedownloadButtonState();
+    updateConnectButtonHighlight();
   }
 });
 
 $('btn-disconnect').addEventListener('click', async () => {
   await stlink.disconnect();
   connected = false;
+  updateFirmwareFileInputState();
   resetFirmwareUI({ clearFileInput: true });
   resetChipInfoPanel();
   $('log').innerHTML = '';
@@ -3119,7 +3325,132 @@ $('btn-disconnect').addEventListener('click', async () => {
   $('btn-disconnect').style.display = 'none';
   $('btn-read').disabled = true;
   $('btn-program').disabled = true;
+  updateRedownloadButtonState();
+  updateConnectButtonHighlight();
   log('已断开连接，页面已清空', 'warn');
+});
+
+$('btn-redownload').addEventListener('click', async () => {
+  if (!checkRuntimeRequirements({ showModal: true })) return;
+  if (!lastFirmwareSnapshot) {
+    log('✗ 没有可用的上次固件，请先手动加载并下载一次', 'err');
+    return;
+  }
+
+  const originalDisabled = {
+    connect: $('btn-connect').disabled,
+    disconnect: $('btn-disconnect').disabled,
+    read: $('btn-read').disabled,
+    program: $('btn-program').disabled,
+  };
+
+  redownloadFlowBusy = true;
+  $('btn-redownload').disabled = true;
+  $('btn-connect').disabled = true;
+  $('btn-disconnect').disabled = true;
+  $('btn-read').disabled = true;
+  $('btn-program').disabled = true;
+  updateFirmwareFileInputState();
+  updateRedownloadButtonState();
+  updateConnectButtonHighlight();
+
+  try {
+    log('────────────────────────────', 'info');
+    log('开始执行“再次下载”：重连 → 读取ID → 恢复固件 → 编程', 'info');
+
+    if (connected) {
+      log('步骤 1/4：断开当前连接...', 'info');
+      await stlink.disconnect();
+      connected = false;
+      resetFirmwareUI({ clearFileInput: true });
+      resetChipInfoPanel();
+      $('info-stlink').textContent = '—';
+      $('info-vdd').textContent = '—';
+      setStatus('未连接 ST-Link 设备');
+      $('btn-connect').style.display = 'inline-flex';
+      $('btn-disconnect').style.display = 'none';
+      log('✓ 已断开旧连接', 'ok');
+    } else {
+      log('步骤 1/4：当前未连接，跳过断开', 'info');
+    }
+
+    log('步骤 2/4：恢复上次固件...', 'info');
+    if (!restoreLastFirmwareSnapshot()) {
+      throw new Error('恢复上次固件失败');
+    }
+
+    log('步骤 3/4：重新连接设备...', 'info');
+    $('btn-connect').disabled = false;
+    $('btn-connect').click();
+    const connectedOk = await waitForCondition(() => connected === true, 30000, 120);
+    if (!connectedOk) {
+      throw new Error('重连超时或失败');
+    }
+
+    log('步骤 4/4：自动读取 Chip ID 并开始下载...', 'info');
+    $('btn-read').disabled = false;
+    $('btn-read').click();
+
+    const readStarted = await waitForCondition(
+      () => $('progress-wrap').classList.contains('show'),
+      2000,
+      80
+    );
+    if (readStarted) {
+      const readDone = await waitForCondition(
+        () => !$('progress-wrap').classList.contains('show'),
+        45000,
+        120
+      );
+      if (!readDone) {
+        throw new Error('自动读取 Chip ID 超时');
+      }
+    }
+
+    if ($('chip-id-display').classList.contains('empty')) {
+      throw new Error('自动读取 Chip ID 失败');
+    }
+
+    $('btn-program').disabled = false;
+    $('btn-program').click();
+    const programStarted = await waitForCondition(
+      () => $('progress-program').style.display === 'block',
+      2000,
+      80
+    );
+    if (!programStarted) {
+      throw new Error('自动编程未启动');
+    }
+
+    const programDone = await waitForCondition(
+      () => $('progress-program').style.display === 'none',
+      180000,
+      150
+    );
+    if (!programDone) {
+      throw new Error('自动编程超时');
+    }
+
+    const elapsedEl = $('program-last-time');
+    if (elapsedEl && elapsedEl.style.color === 'var(--accent2)') {
+      throw new Error('自动编程失败，请查看日志');
+    }
+
+    log('✓ 再次下载流程完成', 'ok');
+    log('────────────────────────────', 'ok');
+  } catch (err) {
+    log(`✗ 再次下载失败: ${err.message}`, 'err');
+    log('────────────────────────────', 'err');
+  } finally {
+    redownloadFlowBusy = false;
+    $('btn-connect').disabled = originalDisabled.connect;
+    $('btn-disconnect').disabled = originalDisabled.disconnect;
+    $('btn-read').disabled = originalDisabled.read || !connected;
+    $('btn-program').disabled = originalDisabled.program || !connected || !firmwareData;
+    updateFirmwareFileInputState();
+    updateRedownloadButtonState();
+    updateConnectButtonHighlight();
+  }
 });
 
 $('btn-read').addEventListener('click', async () => {
