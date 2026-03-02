@@ -1371,8 +1371,10 @@ class STLinkUSB {
     // 写入 8 位数据块（用于加载 ARM 程序到 SRAM）
     if (!data || data.length === 0) return true;
     
-    // 参考 webstlink/pystlink：WRITEMEM_8BIT 单次建议不超过 64 字节
+    // ST-Link V2 WRITEMEM_8BIT 单次上限 64 字节（V2 固件硬限制）
     const chunk_size = 64;
+    // SRAM 写入（0x2xxxxxxx）无需状态查询，省掉 2 次 USB 往返/chunk
+    const isSRAM = (addr & 0xF0000000) === 0x20000000;
     
     for (let offset = 0; offset < data.length; offset += chunk_size) {
       const chunk = data.slice(offset, Math.min(offset + chunk_size, data.length));
@@ -1386,11 +1388,6 @@ class STLinkUSB {
         0, 0, 0, 0, 0, 0, 0, 0
       ]);
 
-      const getRwStatusCmd = new Uint8Array([
-        CMD.DEBUG_COMMAND, DEBUG_CMD.GET_LAST_RW_STATUS,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-      ]);
-      
       const statusTimeoutMs = this.programmingProfile.writeMem8StatusTimeoutMs || 500;
       const maxAttempts = this.programmingProfile.writeMem8RetryCount || 1;
       let lastErr = null;
@@ -1404,6 +1401,17 @@ class STLinkUSB {
           outResult = await this.device.transferOut(this.epOut, chunk);
           if (outResult.status !== 'ok') throw new Error(`WriteMem8 Payload transferOut failed: ${outResult.status}`);
 
+          if (isSRAM) {
+            // SRAM 写入：跳过状态查询，直接认为成功（SRAM 不会编程失败）
+            chunkOk = true;
+            break;
+          }
+
+          // 非 SRAM（Flash 等）：查询写入状态
+          const getRwStatusCmd = new Uint8Array([
+            CMD.DEBUG_COMMAND, DEBUG_CMD.GET_LAST_RW_STATUS,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+          ]);
           outResult = await this.device.transferOut(this.epOut, getRwStatusCmd);
           if (outResult.status !== 'ok') throw new Error(`WriteMem8 GetStatus transferOut failed: ${outResult.status}`);
 
@@ -1534,7 +1542,7 @@ class STLinkUSB {
     // 等待 ARM 程序在断点处停下（轮询 DHCSR.S_HALT 更可靠）
     const DHCSR = 0xE000EDF0;
     const startTime = Date.now();
-    const pollInterval = 10;
+    const pollInterval = 1;  // 1ms 精细轮询，减少空等
     
     while (Date.now() - startTime < maxWaitMs) {
       try {
@@ -1564,6 +1572,51 @@ class STLinkUSB {
     
     console.warn(`waitForBreakpoint 超时 (> ${maxWaitMs}ms)`);
     return false;
+  }
+
+  async writeMemBulk32(addr, data) {
+    // 批量 32 位写入：用 WRITEMEM_32BIT 一次写入大块数据到 SRAM
+    // addr 和 data.length 必须 4 字节对齐
+    // ST-Link V2 对 32 位写入支持到 ~6KB/次，保守用 2048
+    const MAX_CHUNK = 2048;
+    for (let off = 0; off < data.length; off += MAX_CHUNK) {
+      const end = Math.min(off + MAX_CHUNK, data.length);
+      const chunk = data.slice(off, end);
+      const curAddr = addr + off;
+      const cmd = new Uint8Array(16);
+      cmd[0] = CMD.DEBUG_COMMAND;
+      cmd[1] = DEBUG_CMD.WRITEMEM_32BIT;
+      cmd[2] = curAddr & 0xFF;
+      cmd[3] = (curAddr >> 8) & 0xFF;
+      cmd[4] = (curAddr >> 16) & 0xFF;
+      cmd[5] = (curAddr >> 24) & 0xFF;
+      cmd[6] = chunk.length & 0xFF;
+      cmd[7] = (chunk.length >> 8) & 0xFF;
+
+      let r = await this.device.transferOut(this.epOut, cmd);
+      if (r.status !== 'ok') throw new Error(`writeMemBulk32 cmd failed @0x${curAddr.toString(16)}`);
+      
+      r = await this.device.transferOut(this.epOut, chunk);
+      if (r.status !== 'ok') throw new Error(`writeMemBulk32 data failed @0x${curAddr.toString(16)}`);
+      
+      // SRAM 写入可跳过状态查询（与 writeMem8 SRAM 路径一致）
+      if ((addr & 0xF0000000) !== 0x20000000) {
+        const statusCmd = new Uint8Array(16);
+        statusCmd[0] = CMD.DEBUG_COMMAND;
+        statusCmd[1] = DEBUG_CMD.GET_LAST_RW_STATUS;
+        r = await this.device.transferOut(this.epOut, statusCmd);
+        if (r.status !== 'ok') throw new Error(`writeMemBulk32 status cmd failed`);
+        const sr = await Promise.race([
+          this.device.transferIn(this.epIn, 2),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('writeMemBulk32 status timeout')), 500))
+        ]);
+        const st = new Uint8Array(sr.data.buffer, sr.data.byteOffset, sr.data.byteLength);
+        if (st[0] !== STLINK_STATUS_OK && st[0] !== 0x80) {
+          throw new Error(`writeMemBulk32 status error: 0x${st[0].toString(16)}`);
+        }
+      }
+    }
+    return true;
   }
 
   async writeMem32(addr, value) {
@@ -1897,11 +1950,12 @@ class STLinkUSB {
       return await this.flashBlockDirect(baseAddr, blockData);
     }
 
-    // Flash writer 使用 halfword 写入，保证偶数字节长度
-    if ((blockData.length & 1) !== 0) {
-      const padded = new Uint8Array(blockData.length + 1);
+    // WRITEMEM_32BIT 批量写入要求 4 字节对齐（Flash writer 内部使用 halfword）
+    const remainder = blockData.length % 4;
+    if (remainder !== 0) {
+      const padded = new Uint8Array(blockData.length + (4 - remainder));
       padded.set(blockData, 0);
-      padded[blockData.length] = 0xFF;
+      padded.fill(0xFF, blockData.length);  // 填充 0xFF（Flash 擦除态）
       blockData = padded;
     }
     
@@ -1917,30 +1971,27 @@ class STLinkUSB {
         this.armLoaded = true;
       }
       
-      // 2. 数据写入到 SRAM 数据区 (0x20000100)
-      await this.writeMem8(0x20000100, blockData);
+      // 2. 批量写入数据到 SRAM 数据区 (0x20000100)，使用 WRITEMEM_32BIT 大幅减少 USB 往返
+      await this.writeMemBulk32(0x20000100, blockData);
 
-      // 常量寄存器仅在会话首次配置，避免每块重复 USB 往返
+      // 常量/不变寄存器仅首次配置，后续只更新 R1（Flash 目标地址）
       if (!this.armWriterStaticRegsReady) {
         await this.setReg(4, 0x4002200C);           // R4: FLASH_SR
         await this.setReg(5, 0x00000001);           // R5: BSY bit
         await this.setReg(6, 0x00000020);           // R6: EOP bit
+        await this.setReg(0, 0x20000100);           // R0: 数据源（固定）
+        // 预置 PG 位（一次设置，整个编程周期保持）
+        const cr = await this.readDebugReg32(FLASH_CR);
+        await this.writeDebugReg32(FLASH_CR, cr | 0x01);
         this.armWriterStaticRegsReady = true;
+        this._lastArmR2 = 0;
       }
       
-      // 3. 设置 ARM 寄存器参数：
-      //    R0 = 源地址 (0x20000100 - SRAM 数据)
-      //    R1 = 目标地址 (Flash 地址)
-      //    R2 = 字节数（算法内部每次减2）
-      //    R4 = FLASH_SR, R5 = BSY bit, R6 = EOP bit（会话首次已预置）
-      await this.setReg(0, 0x20000100);           // R0: 数据源
-      await this.setReg(1, baseAddr);             // R1: Flash 目标地址
-      await this.setReg(2, blockData.length);     // R2: 字节数
-      await this.setReg(15, 0x20000001);          // PC: SRAM 写入器入口（Thumb）
-
-      // 运行算法前预置 PG 位
-      const cr = await this.readDebugReg32(FLASH_CR);
-      await this.writeDebugReg32(FLASH_CR, cr | 0x01);
+      // 3. 仅设置每块变化的寄存器（R0/R1/R2/PC 每块必须重设，算法运行后会修改它们）
+      await this.setReg(0, 0x20000100);           // R0: 数据源（算法会递增）
+      await this.setReg(1, baseAddr);             // R1: Flash 目标地址（算法会递增）
+      await this.setReg(2, blockData.length);     // R2: 字节数（算法会递减到 0）
+      await this.setReg(15, 0x20000001);          // PC: 入口点（算法会修改）
       
       // 4. 执行 ARM 程序
       await this.core_run();
@@ -2832,6 +2883,7 @@ $('btn-program').addEventListener('click', async () => {
     );
     
     // 可选：全片擦除
+    const eraseStartTs = Date.now();
     if ($('opt-erase-all').checked) {
       log('执行全片擦除（较耗时，请等待）...', 'warn');
       const pageSize = 1024;  // STM32F1/GD32F1 页大小
@@ -2852,6 +2904,7 @@ $('btn-program').addEventListener('click', async () => {
         }
       }
       log('✓ 全片擦除完成', 'ok');
+      log(`  擦除耗时: ${Date.now() - eraseStartTs}ms`, 'info');
     } else {
       // 部分擦除：只擦除将要编程的页
       log('擦除目标页面...', 'info');
@@ -2876,6 +2929,7 @@ $('btn-program').addEventListener('click', async () => {
       }
       
       log(`✓ 已擦除 ${erased} 个页面`, 'ok');
+      log(`  擦除耗时: ${Date.now() - eraseStartTs}ms`, 'info');
     }
 
     log('擦除后清理 Flash 错误状态...', 'info');
@@ -2885,8 +2939,9 @@ $('btn-program').addEventListener('click', async () => {
     
     // 编程每个段
     log('开始写入数据 (使用块优化)...', 'info');
+    const writeStartTs = Date.now();
     
-    const BLOCK_SIZE = 256;  // 每块 256 字节 (平衡 USB 往返和操作数)
+    const BLOCK_SIZE = 8192;  // 每块 8KB（SRAM 缓冲 0x20000100~0x20002100，远小于 20KB SRAM）
     let lastSegIndex = -1;
     
     for (let segIdx = 0; segIdx < programSegments.length; segIdx++) {
@@ -2925,7 +2980,8 @@ $('btn-program').addEventListener('click', async () => {
       }
     }
     
-    log(`✓ 数据写入完成 (总计 ${totalSize} 字节)`, 'ok');
+    const writeElapsedMs = Date.now() - writeStartTs;
+    log(`✓ 数据写入完成 (总计 ${totalSize} 字节，写入耗时 ${writeElapsedMs}ms)`, 'ok');
     
     // 可选：验证
     if (verifyEnabled) {
