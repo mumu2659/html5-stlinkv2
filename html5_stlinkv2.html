@@ -1811,6 +1811,87 @@ class STLinkUSB {
     }
   }
 
+  async flashMassErase(timeoutMs = 10000) {
+    // STM32F1/GD32F1 硬件全片擦除：FLASH_CR.MER + STRT，仅需 4 次 USB 往返
+    const FLASH_CR = 0x40022010;
+    const FLASH_SR = 0x4002200C;
+    try {
+      // 1. 设置 MER (Mass Erase) 位 [bit2]
+      await this.writeDebugReg32(FLASH_CR, 0x04);  // MER=1，清除其他控制位
+      
+      // 2. 设置 STRT 位 [bit6] 触发擦除
+      await this.writeDebugReg32(FLASH_CR, 0x44);  // MER=1 + STRT=1
+      
+      // 3. 等待 BSY 清除（全片擦除耗时较长，STM32F1 约 20-40ms，GD32 可能更久）
+      const startTime = Date.now();
+      while (Date.now() - startTime < timeoutMs) {
+        const sr = await this.readDebugReg32(FLASH_SR);
+        if ((sr & 0x01) === 0) {  // BSY=0
+          // 清除 EOP 和错误标志
+          if (sr & 0x34) {
+            await this.writeDebugReg32(FLASH_SR, sr & 0x34);
+          }
+          // 4. 清除 MER 位
+          await this.writeDebugReg32(FLASH_CR, 0x00);
+          return true;
+        }
+        // 全片擦除通常 20-40ms，短间隔轮询
+        await new Promise(r => setTimeout(r, 2));
+      }
+      // 超时：仍清除 MER
+      await this.writeDebugReg32(FLASH_CR, 0x00).catch(() => {});
+      console.warn(`全片擦除超时 (${timeoutMs}ms)`);
+      return false;
+    } catch (e) {
+      console.warn(`全片擦除失败: ${e.message}`);
+      await this.writeDebugReg32(FLASH_CR, 0x00).catch(() => {});
+      return false;
+    }
+  }
+
+  async flashErasePages(pageAddrs) {
+    // 批量页擦除优化：PER 位只设置/清除一次，每页仅 AR + STRT + BSY 轮询
+    const FLASH_CR = 0x40022010;
+    const FLASH_AR = 0x40022014;
+    const FLASH_SR = 0x4002200C;
+    
+    try {
+      // 设置 PER 位（一次）
+      await this.writeDebugReg32(FLASH_CR, 0x02);  // PER=1
+      const crWithPER = 0x02;
+      
+      for (let i = 0; i < pageAddrs.length; i++) {
+        // 设置页地址
+        await this.writeDebugReg32(FLASH_AR, pageAddrs[i]);
+        // 触发擦除 (PER + STRT)
+        await this.writeDebugReg32(FLASH_CR, crWithPER | 0x40);
+        
+        // 等待 BSY 清除（页擦除约 20-30ms）
+        const startTime = Date.now();
+        while (Date.now() - startTime < 5000) {
+          const sr = await this.readDebugReg32(FLASH_SR);
+          if ((sr & 0x01) === 0) {  // BSY=0
+            // 有错误标志就清除（不中断，继续下一页）
+            if (sr & 0x14) {
+              await this.writeDebugReg32(FLASH_SR, sr & 0x14);
+              console.warn(`页擦除警告 0x${pageAddrs[i].toString(16)}: SR=0x${sr.toString(16)}`);
+            }
+            break;
+          }
+          await new Promise(r => setTimeout(r, 1));
+        }
+      }
+      
+      // 清除 PER 位（一次）
+      await this.writeDebugReg32(FLASH_CR, 0x00);
+      return true;
+    } catch (e) {
+      console.warn(`批量页擦除失败: ${e.message}`);
+      await this.writeDebugReg32(FLASH_CR, 0x00).catch(() => {});
+      return false;
+    }
+  }
+
   async flashErasePage(pageAddr) {
     // Erase a single Flash page
     // For STM32F1/GD32F1: page size is 1KB
@@ -2885,29 +2966,17 @@ $('btn-program').addEventListener('click', async () => {
     // 可选：全片擦除
     const eraseStartTs = Date.now();
     if ($('opt-erase-all').checked) {
-      log('执行全片擦除（较耗时，请等待）...', 'warn');
-      const pageSize = 1024;  // STM32F1/GD32F1 页大小
-      const maxPages = Math.max(1, Math.floor((flashSizeKBForProgram * 1024) / pageSize));
-      log(`全片擦除范围: ${flashSizeKBForProgram}KB (${maxPages} 页)`, 'info');
-      
-      for (let p = 0; p < maxPages; p++) {
-        const pageAddr = 0x08000000 + (p * pageSize);
-        const ok = await stlink.flashErasePage(pageAddr);
-        updateProgramProgressByStage('erase', '全片擦除中', p + 1, maxPages, `页擦除 ${p + 1}/${maxPages}`);
-        
-        if ((p + 1) % 64 === 0) {
-          log(`  ▕ 已擦除 ${p + 1} 页...`, 'info');
-        }
-        
-        if (!ok) {
-          throw new Error(`全片擦除失败于 0x${pageAddr.toString(16)}`);
-        }
+      log('执行全片擦除（硬件 MER 模式）...', 'warn');
+      updateProgramProgressByStage('erase', '全片擦除中', 0, 1, '硬件全片擦除...');
+      const ok = await stlink.flashMassErase();
+      updateProgramProgressByStage('erase', '全片擦除中', 1, 1, '全片擦除完成');
+      if (!ok) {
+        throw new Error('硬件全片擦除失败');
       }
       log('✓ 全片擦除完成', 'ok');
       log(`  擦除耗时: ${Date.now() - eraseStartTs}ms`, 'info');
     } else {
       // 部分擦除：只擦除将要编程的页
-      log('擦除目标页面...', 'info');
       const pageSize = 1024;
       const pagesToErase = new Set();
       
@@ -2917,18 +2986,31 @@ $('btn-program').addEventListener('click', async () => {
           pagesToErase.add(pageStart);
         }
       }
-      
-      let erased = 0;
-      for (const pageAddr of pagesToErase) {
-        const ok = await stlink.flashErasePage(pageAddr);
-        erased++;
-        updateProgramProgressByStage('erase', '擦除目标页', erased, pagesToErase.size, `页擦除 ${erased}/${pagesToErase.size}`);
+
+      const totalPages = Math.max(1, Math.floor((flashSizeKBForProgram * 1024) / pageSize));
+      const pageAddrs = Array.from(pagesToErase).sort((a, b) => a - b);
+
+      // 当需要擦除的页数 >= 总页数 75% 时，自动用硬件全片擦除（更快）
+      if (pageAddrs.length >= totalPages * 0.75) {
+        log(`需擦除 ${pageAddrs.length}/${totalPages} 页（≥75%），自动使用硬件全片擦除...`, 'info');
+        updateProgramProgressByStage('erase', '全片擦除中', 0, 1, '硬件全片擦除...');
+        const ok = await stlink.flashMassErase();
+        updateProgramProgressByStage('erase', '全片擦除中', 1, 1, '全片擦除完成');
         if (!ok) {
-          console.warn(`页擦除可能失败于 0x${pageAddr.toString(16)}`);
+          throw new Error('硬件全片擦除失败');
         }
+        log(`✓ 全片擦除完成（${pageAddrs.length} 页需求 → mass erase）`, 'ok');
+      } else {
+        log(`擦除目标页面 (${pageAddrs.length}/${totalPages} 页)...`, 'info');
+        updateProgramProgressByStage('erase', '批量擦除中', 0, pageAddrs.length, '批量页擦除...');
+        const ok = await stlink.flashErasePages(pageAddrs);
+        updateProgramProgressByStage('erase', '批量擦除中', pageAddrs.length, pageAddrs.length, '擦除完成');
+        if (!ok) {
+          throw new Error('批量页擦除失败');
+        }
+        log(`✓ 已擦除 ${pageAddrs.length} 个页面`, 'ok');
       }
       
-      log(`✓ 已擦除 ${erased} 个页面`, 'ok');
       log(`  擦除耗时: ${Date.now() - eraseStartTs}ms`, 'info');
     }
 
