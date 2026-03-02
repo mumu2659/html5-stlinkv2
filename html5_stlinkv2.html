@@ -39,7 +39,7 @@
 
   header {
     text-align: center;
-    margin-bottom: 32px;
+    margin-bottom: 20px;
     position: relative;
   }
 
@@ -87,17 +87,17 @@
 
   .status-bar {
     width: 100%;
-    max-width: 760px;
+    max-width: 720px;
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 10px 18px;
+    padding: 9px 16px;
     display: flex;
     align-items: center;
     gap: 10px;
-    margin-bottom: 20px;
+    margin-bottom: 14px;
     font-family: 'Share Tech Mono', monospace;
-    font-size: 0.82rem;
+    font-size: 0.78rem;
   }
 
   .status-dot {
@@ -120,11 +120,11 @@
 
   .main-grid {
     width: 100%;
-    max-width: 760px;
+    max-width: 720px;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 16px;
-    margin-bottom: 16px;
+    gap: 12px;
+    margin-bottom: 12px;
   }
 
   @media (max-width: 560px) {
@@ -135,7 +135,7 @@
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 20px;
+    padding: 14px 16px;
     position: relative;
     overflow: hidden;
   }
@@ -150,14 +150,15 @@
   .panel.wide { grid-column: 1 / -1; }
 
   .panel-title {
-    font-size: 0.7rem;
-    letter-spacing: 3px;
+    font-size: 0.64rem;
+    letter-spacing: 2.5px;
     text-transform: uppercase;
     color: var(--dim);
-    margin-bottom: 14px;
+    margin-bottom: 11px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    font-weight: 500;
   }
   .panel-title::after {
     content: '';
@@ -199,9 +200,39 @@
     color: #000;
     width: 100%;
     justify-content: center;
+    font-weight: 800;
+    font-size: 1rem;
+    padding: 12px 24px;
+    letter-spacing: 2px;
+    position: relative;
+    overflow: hidden;
   }
-  .btn-primary:hover { box-shadow: 0 0 20px rgba(0,229,255,0.45); }
-  .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn-primary::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
+    transform: skewX(-20deg);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .btn-primary:hover {
+    box-shadow: 0 0 28px rgba(0,229,255,0.55);
+    transform: translateY(-1px);
+  }
+  .btn-primary:hover::before {
+    animation: scanline 0.4s ease-in-out forwards;
+  }
+  @keyframes scanline {
+    0% { left: -100%; top: -50%; }
+    50% { opacity: 1; }
+    100% { left: 100%; top: 50%; opacity: 0; }
+  }
+  .btn-primary:active { transform: translateY(0); }
+  .btn-primary:disabled { opacity: 0.42; cursor: not-allowed; }
 
   .btn-secondary {
     background: transparent;
@@ -294,14 +325,15 @@
   }
 
   .field-group {
-    margin-bottom: 14px;
+    margin-bottom: 10px;
   }
   .field-label {
-    font-size: 0.68rem;
-    letter-spacing: 2px;
+    font-size: 0.62rem;
+    letter-spacing: 1.5px;
     text-transform: uppercase;
     color: var(--dim);
-    margin-bottom: 5px;
+    margin-bottom: 4px;
+    font-weight: 500;
   }
   select, input[type="number"] {
     width: 100%;
@@ -310,14 +342,14 @@
     border-radius: 5px;
     color: var(--text);
     font-family: 'Share Tech Mono', monospace;
-    font-size: 0.85rem;
-    padding: 8px 10px;
+    font-size: 0.82rem;
+    padding: 7px 10px;
     outline: none;
-    transition: border-color 0.2s;
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
     -webkit-appearance: none;
     appearance: none;
   }
-  select:focus, input[type="number"]:focus { border-color: var(--accent); }
+  select:focus, input[type="number"]:focus { border-color: var(--accent); background: rgba(0,229,255,0.05); box-shadow: 0 0 10px rgba(0,229,255,0.25); }
 
   .hidden-file-input {
     display: none;
@@ -345,27 +377,41 @@
 
   .info-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 7px;
   }
+  @media (max-width: 500px) { .info-grid { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 400px) { .info-grid { grid-template-columns: 1fr; } }
 
   .info-item {
     background: rgba(255,255,255,0.02);
     border: 1px solid var(--border);
+    border-left: 3px solid var(--border);
     border-radius: 5px;
-    padding: 8px 12px;
+    padding: 8px 10px;
+    transition: all 0.2s;
   }
+  .info-item:nth-child(1) { border-left-color: var(--green); }
+  .info-item:nth-child(2) { border-left-color: var(--accent); }
+  .info-item:nth-child(3) { border-left-color: var(--yellow); }
+  .info-item:nth-child(4) { border-left-color: var(--yellow); }
+  .info-item:nth-child(5) { border-left-color: #b300ff; }
+  .info-item:nth-child(6) { border-left-color: var(--accent); }
+  .info-item:nth-child(7) { border-left-color: #b300ff; }
+  .info-item:nth-child(8) { border-left-color: #b300ff; }
+  .info-item:nth-child(9) { border-left-color: var(--accent2); }
+  .info-item:nth-child(10) { border-left-color: var(--accent2); }
   .info-key {
-    font-size: 0.6rem;
-    letter-spacing: 2px;
+    font-size: 0.57rem;
+    letter-spacing: 1.5px;
     text-transform: uppercase;
     color: var(--dim);
     margin-bottom: 3px;
+    font-weight: 500;
   }
   .info-val {
     font-family: 'Share Tech Mono', monospace;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     color: var(--text);
   }
   .info-val.highlight { color: var(--green); }
@@ -374,11 +420,11 @@
     background: #070910;
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 12px 14px;
+    padding: 10px 12px;
     font-family: 'Share Tech Mono', monospace;
-    font-size: 0.78rem;
-    line-height: 1.7;
-    height: 180px;
+    font-size: 0.75rem;
+    line-height: 1.6;
+    height: 140px;
     overflow-y: auto;
     color: var(--dim);
   }
@@ -427,9 +473,16 @@
     width: 0%;
     height: 100%;
     position: relative;
-    background: linear-gradient(90deg, var(--accent), rgba(0,229,255,0.65));
-    box-shadow: 0 0 10px rgba(0,229,255,0.35);
-    transition: width 0.22s ease;
+    background: linear-gradient(90deg, var(--accent), var(--accent3));
+    box-shadow: 0 0 12px var(--accent);
+  }
+  #progress-bar-program.milestone-pulse {
+    animation: milestonePulse 0.5s ease-out;
+  }
+  @keyframes milestonePulse {
+    0% { box-shadow: 0 0 12px var(--accent), 0 0 20px var(--accent2); }
+    50% { box-shadow: 0 0 20px var(--accent), 0 0 35px var(--accent2); }
+    100% { box-shadow: 0 0 12px var(--accent); }
   }
   #progress-bar-program::after {
     content: '';
@@ -468,6 +521,14 @@
     flex-wrap: wrap;
     justify-content: center;
     margin-top: 8px;
+  }
+  .uid-bytes.uid-flash .uid-byte {
+    animation: uidFlash 0.4s ease-out;
+  }
+  @keyframes uidFlash {
+    0% { background: rgba(0, 217, 255, 0.3); border-color: rgba(0, 217, 255, 0.6); }
+    50% { background: rgba(0, 217, 255, 0.5); border-color: rgba(0, 217, 255, 0.9); box-shadow: 0 0 12px rgba(0, 217, 255, 0.5); }
+    100% { background: rgba(0, 229, 255, 0.08); border-color: rgba(0, 229, 255, 0.2); box-shadow: none; }
   }
   .uid-byte {
     background: rgba(0,229,255,0.08);
@@ -589,9 +650,66 @@
     color: var(--accent2);
     margin-bottom: 16px;
     display: none;
-    max-width: 760px;
+    max-width: 720px;
     width: 100%;
     font-family: 'Share Tech Mono', monospace;
+  }
+
+  /* 工作流步骤指示器 */
+  .workflow-steps {
+    display: flex;
+    gap: 6px;
+    max-width: 720px;
+    width: 100%;
+    margin: 0 auto 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .workflow-step {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.7rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 5px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    color: var(--dim);
+    transition: all 0.3s;
+  }
+  .workflow-step .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid var(--dim);
+    font-weight: 700;
+    font-size: 0.65rem;
+  }
+  .workflow-step.completed { color: var(--green); border-color: var(--green); }
+  .workflow-step.completed .step-num { background: var(--green); color: #000; border-color: var(--green); }
+  .workflow-step.current { color: var(--accent); border-color: var(--accent); background: rgba(0,229,255,0.08); }
+  .workflow-step.current .step-num { border-color: var(--accent); color: var(--accent); font-weight: 900; }
+  .workflow-step.next { color: var(--text); border-color: var(--accent); box-shadow: 0 0 12px rgba(0,229,255,0.2); }
+
+  /* 动态帮助文本 */
+  .workflow-guidance {
+    width: 100%;
+    max-width: 720px;
+    margin: 0 auto 10px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: rgba(0,229,255,0.05);
+    border: 1px solid rgba(0,229,255,0.15);
+    color: var(--accent);
+    font-size: 0.75rem;
+    font-family: 'Share Tech Mono', monospace;
+    text-align: center;
+    min-height: 18px;
+    transition: all 0.3s;
   }
 </style>
 </head>
@@ -696,6 +814,29 @@
   <button class="btn btn-secondary" id="btn-connect" style="margin-left:auto; flex-shrink:0">连接产品</button>
   <button class="btn btn-danger" id="btn-disconnect" style="display:none; flex-shrink:0">断开</button>
 </div>
+
+<!-- 工作流步骤指示器 -->
+<div class="workflow-steps">
+  <div class="workflow-step step-1 current">
+    <span class="step-num">1</span>
+    <span>连接</span>
+  </div>
+  <div class="workflow-step step-2">
+    <span class="step-num">2</span>
+    <span>读取</span>
+  </div>
+  <div class="workflow-step step-3">
+    <span class="step-num">3</span>
+    <span>编程</span>
+  </div>
+  <div class="workflow-step step-4">
+    <span class="step-num">4</span>
+    <span>完成</span>
+  </div>
+</div>
+
+<!-- 动态帮助文本 -->
+<div class="workflow-guidance" id="guidance">🔌 点击"连接产品"开始</div>
 
 <div class="main-grid">
   <!-- 配置 -->
@@ -2006,6 +2147,28 @@ const setStatus = (text, type = '') => {
   st.textContent = text;
 };
 
+// 工作流控制：更新步骤指示器和帮助文本
+const updateWorkflow = (step, guidance) => {
+  ['step-1', 'step-2', 'step-3', 'step-4'].forEach(s => {
+    const el = $(s);
+    if (el) {
+      el.classList.remove('completed', 'current', 'next');
+      const stepNum = parseInt(s.split('-')[1]);
+      if (stepNum < step) {
+        el.classList.add('completed');
+      } else if (stepNum === step) {
+        el.classList.add('current');
+      } else if (stepNum === step + 1) {
+        el.classList.add('next');
+      }
+    }
+  });
+  const guidanceEl = $('guidance');
+  if (guidanceEl && guidance) {
+    guidanceEl.textContent = guidance;
+  }
+};
+
 const setBusy = (on) => {
   const pw = $('progress-wrap');
   on ? pw.classList.add('show') : pw.classList.remove('show');
@@ -2560,7 +2723,19 @@ const updateProgramProgressByStage = (stage, step, current, total, detailText = 
 
   const bar = $('progress-bar-program');
   bar.classList.remove('done', 'error');
+  const oldPercent = parseFloat(bar.style.width) || 0;
   bar.style.width = `${percent.toFixed(2)}%`;
+  
+  // 检测里程碑（25%、50%、75%）
+  const milestones = [25, 50, 75];
+  for (const m of milestones) {
+    if (oldPercent < m && percent >= m) {
+      bar.classList.remove('milestone-pulse');
+      void bar.offsetWidth; // 强制重排以重置动画
+      bar.classList.add('milestone-pulse');
+    }
+  }
+  
   updateProgramEta(percent);
 
   $('progress-detail').textContent = detailText || `${(current / 1024).toFixed(2)} / ${(total / 1024).toFixed(2)} KB`;
@@ -2948,6 +3123,8 @@ $('btn-program').addEventListener('click', async () => {
     log('────────────────────────────', 'ok');
     setProgramElapsed(totalElapsedMs, true);
     
+    updateWorkflow(4, '✓ 完成！芯片已编程并验证，可重新拔插产品');
+    
   } catch (err) {
     $('progress-bar-program').classList.add('error');
     $('progress-eta').textContent = 'ETA --';
@@ -2958,6 +3135,8 @@ $('btn-program').addEventListener('click', async () => {
     log(`⏱ 失败前用时: ${formatProgramElapsed(totalElapsedMs)}`, 'err');
     log(`────────────────────────────`, 'err');
     console.error(err);
+    
+    updateWorkflow(3, '⚠ 编程失败，请检查固件文件或重新连接');
   } finally {
     // 先立即更新 UI（避免进度条停滞等待后续清理操作）
     programProgressStartTs = 0;
@@ -3138,6 +3317,8 @@ $('btn-connect').addEventListener('click', async () => {
     setStatus(`已连接 ${device.productName || 'ST-Link'} (${ver})`, 'connected');
     log(`✔ 连接成功: ${ver}  Vdd=${vdd}V`, 'ok');
     log('━━━ 诊断完成 ━━━', 'ok');
+
+    updateWorkflow(2, '📋 点击"读取 Chip ID"获取芯片信息');
 
     $('btn-connect').style.display = 'none';
     $('btn-disconnect').style.display = 'inline-flex';
@@ -3638,7 +3819,13 @@ $('btn-read').addEventListener('click', async () => {
 
     $('btn-copy').disabled = false;
     $('btn-copy').onclick = () => {
-      navigator.clipboard.writeText(uidStr).then(() => log('UID 已复制到剪贴板', 'ok'));
+      navigator.clipboard.writeText(uidStr).then(() => {
+        // 闪光效果反馈
+        const bytesEl = $('uid-bytes');
+        bytesEl.classList.add('uid-flash');
+        setTimeout(() => bytesEl.classList.remove('uid-flash'), 400);
+        log('UID 已复制到剪贴板', 'ok');
+      });
     };
     $('chip-hint').textContent = `UID 地址: 0x${uidBase.toString(16).toUpperCase()}`;
 
@@ -3648,6 +3835,8 @@ $('btn-read').addEventListener('click', async () => {
     log(`  UID[2] = 0x${toHex32(w2)}`, 'ok');
     log(`✔ 完整 UID: ${uidFmt}`, 'ok');
     setStatus(`已连接 · ${$('info-model').textContent}`, 'connected');
+    
+    updateWorkflow(3, '💾 选择固件文件，点击"开始下载"进行编程');
 
   } catch(e) {
     log(`✘ 错误：${e.message}`, 'err');
