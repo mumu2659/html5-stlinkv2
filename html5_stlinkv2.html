@@ -3630,7 +3630,7 @@ $('btn-read').addEventListener('click', async () => {
     log('清理旧调试状态...', 'info');
     try {
       await stlink.leaveState();
-      await new Promise(r => setTimeout(r, 200));  // 仅最小延迟用于状态切换
+      await new Promise(r => setTimeout(r, 50));
       log('  ✔ 旧状态已清理', 'ok');
     } catch(e) {
       log(`  ⚠ 清理旧状态异常: ${e.message}`, 'warn');
@@ -3654,12 +3654,11 @@ $('btn-read').addEventListener('click', async () => {
       log(`  ⚠ 频率设置异常，忽略: ${ef.message}`, 'warn');
     }
     
-    // 最小初始化延迟（DAP 通常很快响应）
-    log('等待 DAP 初始化...', 'info');
-    await new Promise(r => setTimeout(r, 300));  // 仅最小延迟
+    // DAP 初始化（SWD 进入后立即可用）
+    log('验证 DAP 链路...', 'info');
+    await new Promise(r => setTimeout(r, 50));
     
     // 多次尝试读 DAP_IDCODE（有时第一次失败）
-    log('验证 DAP 链路...', 'info');
     let dapOk = false;
     let dapId = 0;
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -3701,9 +3700,9 @@ $('btn-read').addEventListener('click', async () => {
       }
       
       await stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.RESETCORE], 2);
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise(r => setTimeout(r, 20));
       await stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.HALTCORE], 2);
-      await new Promise(r => setTimeout(r, 100));
+      await new Promise(r => setTimeout(r, 20));
       log('  ✔ 芯片已 HALT', 'ok');
 
       // 读 PC 寄存器验证链路（reg 15 = PC）
@@ -3946,14 +3945,12 @@ $('btn-read').addEventListener('click', async () => {
       bytesEl.appendChild(span);
     });
 
-    // 恢复运行（后台操作，不阻塞主流程）
-    // 数据已获取，立即进入清理阶段，RUNCORE 是可选的
+    // 恢复运行
     try {
-      stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.RUNCORE], 2)
-        .then(() => log('  ✔ 芯片已恢复运行', 'ok'))
-        .catch(e => console.log(`⚠️ RUNCORE 失败但继续: ${e.message}`));
+      await stlink.xfer([CMD.DEBUG_COMMAND, DEBUG_CMD.RUNCORE], 2);
+      log('  ✔ 芯片已恢复运行', 'ok');
     } catch(e) {
-      // 忽略
+      console.log(`⚠️ RUNCORE 失败但继续: ${e.message}`);
     }
 
     $('btn-copy').disabled = false;
@@ -3962,9 +3959,10 @@ $('btn-read').addEventListener('click', async () => {
     };
     $('chip-hint').textContent = `UID 地址: 0x${uidBase.toString(16).toUpperCase()}`;
 
-    log(`  UID[0] = 0x${toHex8(w0)}`, 'ok');
-    log(`  UID[1] = 0x${toHex8(w1)}`, 'ok');
-    log(`  UID[2] = 0x${toHex8(w2)}`, 'ok');
+    const toHex32 = n => (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
+    log(`  UID[0] = 0x${toHex32(w0)}`, 'ok');
+    log(`  UID[1] = 0x${toHex32(w1)}`, 'ok');
+    log(`  UID[2] = 0x${toHex32(w2)}`, 'ok');
     log(`✔ 完整 UID: ${uidFmt}`, 'ok');
     setStatus(`已连接 · ${$('info-model').textContent}`, 'connected');
 
@@ -3980,14 +3978,6 @@ $('btn-read').addEventListener('click', async () => {
     log(`◆ 如果 LED 显示绿色但仍读不到数据：`, 'warn');
     log(`  • 检查浏览器控制台 (F12→Console) 的 readMem32 输出`, 'warn');
   } finally {
-    // 清理调试连接（按当前模式智能清理）
-    try {
-      await stlink.leaveState();
-      console.log('✓ 调试连接已清理');
-    } catch(e) {
-      console.log(`ℹ️ 调试清理跳过: ${e.message}`);
-    }
-    
     setBusy(false);
   }
 });
