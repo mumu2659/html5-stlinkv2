@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,6 +13,7 @@
     --border: #1e2535;
     --accent: #00e5ff;
     --accent2: #ff4081;
+    --accent3: #b300ff;
     --green: #00ff9d;
     --yellow: #ffd600;
     --text: #cdd6f4;
@@ -1513,7 +1514,7 @@ const i18n = {
 let currentLang = 'en';
 
 const tr = (key) => {
-  return i18n['en'][key] || key;
+  return i18n[currentLang]?.[key] || i18n['en']?.[key] || key;
 };
 
 
@@ -1583,17 +1584,11 @@ const updateUILanguage = () => {
   }
   
   if ($('program-elapsed-label')) $('program-elapsed-label').textContent = tr('time.elapsed');
-  
-  // Update precaution text
-  if ($('precaution-text')) {
-    $('precaution-text').innerHTML = 'Before connecting, ensure: STM32CubeIDE / CubeProgrammer are closed, and no <code style="background:rgba(255,255,255,0.07);padding:0 4px;border-radius:3px">st-info</code> / <code style="background:rgba(255,255,255,0.07);padding:0 4px;border-radius:3px">st-flash</code> commands are running in terminal. If connection fails, <strong style="color:var(--text)">physically unplug and replug USB</strong>.';
-  }
+
+  // Note: precaution-text and modal-desc-text content is static in HTML
+  // No need to update via JS since there's no translation for them currently
+
   if ($('precaution-dismiss')) $('precaution-dismiss').textContent = tr('precaution.dismiss');
-  
-  // Update modal dialog text
-  if ($('modal-desc-text')) {
-    $('modal-desc-text').innerHTML = tr('modal.conflict.desc') + '<br><br>' + tr('modal.conflict.solution');
-  }
   if ($('copy-hint')) $('copy-hint').textContent = tr('msg.copy.btn');
   if ($('modal-required-title')) $('modal-required-title').textContent = tr('modal.required.title');
   
@@ -1835,8 +1830,13 @@ class STLinkUSB {
 
   async getTargetVoltage() {
     const r = await this.xfer([CMD.GET_TARGET_VOLTAGE], 8);
-    const factor  = ((r[3] << 24) | (r[2] << 16) | (r[1] << 8) | r[0]);
-    const reading = ((r[7] << 24) | (r[6] << 16) | (r[5] << 8) | r[4]);
+    return STLinkUSB.calculateVoltage(r);
+  }
+
+  // 静态方法：从原始响应计算电压值
+  static calculateVoltage(responseBytes) {
+    const factor  = ((responseBytes[3] << 24) | (responseBytes[2] << 16) | (responseBytes[1] << 8) | responseBytes[0]);
+    const reading = ((responseBytes[7] << 24) | (responseBytes[6] << 16) | (responseBytes[5] << 8) | responseBytes[4]);
     if (factor === 0) return 0;
     return (2 * reading * 1.2 / factor).toFixed(2);
   }
@@ -2789,6 +2789,49 @@ document.querySelectorAll('.panel-title').forEach(title => {
   });
 });
 
+// Setup copy button event listeners (once during initialization)
+function setupCopyButtonListeners() {
+  // Main copy button (copies UID without dashes)
+  const btnCopy = $('btn-copy');
+  if (btnCopy) {
+    btnCopy.addEventListener('click', () => {
+      const uid = btnCopy.dataset.uid;
+      if (!uid) return;
+      navigator.clipboard.writeText(uid).then(() => {
+        const bytesEl = $('uid-bytes');
+        if (bytesEl) {
+          bytesEl.classList.add('uid-flash');
+          setTimeout(() => bytesEl.classList.remove('uid-flash'), 400);
+        }
+        log('UID copied to clipboard', 'ok');
+      });
+    });
+  }
+
+  // Info panel copy button (copies formatted UID with dashes)
+  const btnInfoCopy = $('btn-info-chipid-copy');
+  if (btnInfoCopy) {
+    btnInfoCopy.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const uid = btnInfoCopy.dataset.uid;
+      if (!uid) return;
+      navigator.clipboard.writeText(uid).then(() => {
+        const origText = btnInfoCopy.textContent;
+        btnInfoCopy.textContent = '✓';
+        btnInfoCopy.style.color = 'var(--green)';
+        setTimeout(() => {
+          btnInfoCopy.textContent = origText;
+          btnInfoCopy.style.color = '';
+        }, 800);
+        log('Chip ID copied to clipboard', 'ok');
+      });
+    });
+  }
+}
+
+// Initialize copy button listeners
+setupCopyButtonListeners();
+
 const log = (msg, cls = '') => {
   const el = document.createElement('div');
   el.className = 'log-line' + (cls ? ' ' + cls : '');
@@ -2865,19 +2908,51 @@ const REQUIRED_MODAL_COPY = {
   ],
 };
 
-function buildRequiredModalHtml(leadText, actions = [], prefixTitle = 'Solutions') {
-  const body = [leadText];
-  if (actions.length > 0) {
-    body.push(`<br><br>${prefixTitle}：<br>` + actions.map((s, i) => `${i + 1}. ${s}`).join('<br>'));
-  }
-  return body.join('');
+function buildRequiredModalContent(leadText, actions = [], prefixTitle = 'Solutions') {
+  return { leadText, actions, prefixTitle };
 }
 
-function showRequiredModal(title, htmlText) {
+function showRequiredModal(title, contentData) {
   const titleEl = document.getElementById('modal-required-title');
   const descEl = document.getElementById('modal-required-desc');
   if (titleEl) titleEl.textContent = title || 'Runtime Conditions Not Met';
-  if (descEl) descEl.innerHTML = htmlText || 'Please follow the suggestions and retry.';
+
+  if (descEl) {
+    descEl.innerHTML = ''; // Clear content
+
+    if (typeof contentData === 'string') {
+      descEl.textContent = contentData;
+    } else if (contentData && typeof contentData === 'object') {
+      // Build content safely using DOM methods
+      const leadP = document.createElement('p');
+      leadP.textContent = contentData.leadText || '';
+      descEl.appendChild(leadP);
+
+      if (contentData.actions && contentData.actions.length > 0) {
+        const spacer = document.createElement('div');
+        spacer.style.marginTop = '12px';
+        descEl.appendChild(spacer);
+
+        const prefixP = document.createElement('p');
+        prefixP.textContent = contentData.prefixTitle + ':';
+        descEl.appendChild(prefixP);
+
+        const ol = document.createElement('ol');
+        ol.style.marginLeft = '20px';
+        ol.style.marginTop = '8px';
+        contentData.actions.forEach(action => {
+          const li = document.createElement('li');
+          li.textContent = action;
+          li.style.marginBottom = '4px';
+          ol.appendChild(li);
+        });
+        descEl.appendChild(ol);
+      }
+    } else {
+      descEl.textContent = 'Please follow the suggestions and retry.';
+    }
+  }
+
   document.getElementById('modal-required').classList.add('show');
 }
 
@@ -3458,7 +3533,7 @@ $('btn-program').addEventListener('click', async () => {
     if (!unlocked) {
       showRequiredModal(
         REQUIRED_MODAL_COPY.flashUnlockTitle,
-        buildRequiredModalHtml(REQUIRED_MODAL_COPY.flashUnlockLead, REQUIRED_MODAL_COPY.flashUnlockActions, '请按顺序check')
+        buildRequiredModalContent(REQUIRED_MODAL_COPY.flashUnlockLead, REQUIRED_MODAL_COPY.flashUnlockActions, 'Please check in order')
       );
       throw new Error('Flash unlock failed, possibly hardware issue or chip not connected');
     }
@@ -3906,7 +3981,7 @@ $('btn-connect').addEventListener('click', async () => {
       setStatus(`${tr('status.disconnected')} (${tr('log.conn.endpoint.error')})`, 'error');
       showRequiredModal(
         REQUIRED_MODAL_COPY.endpointTitle,
-        buildRequiredModalHtml(REQUIRED_MODAL_COPY.endpointLead, REQUIRED_MODAL_COPY.endpointActions)
+        buildRequiredModalContent(REQUIRED_MODAL_COPY.endpointLead, REQUIRED_MODAL_COPY.endpointActions)
       );
       try { await device.releaseInterface(0); } catch(_) {}
       try { await device.close(); } catch(_) {}
@@ -3954,10 +4029,9 @@ $('btn-connect').addEventListener('click', async () => {
     let vdd = '—';
     try {
       const rv = await stlink.xfer([CMD.GET_TARGET_VOLTAGE], 8);
-      const factor  = (rv[3]<<24)|(rv[2]<<16)|(rv[1]<<8)|rv[0];
-      const reading = (rv[7]<<24)|(rv[6]<<16)|(rv[5]<<8)|rv[4];
-      if (factor > 0) {
-        vdd = (2 * reading * 1.2 / factor).toFixed(2);
+      const vddValue = STLinkUSB.calculateVoltage(rv);
+      if (vddValue > 0) {
+        vdd = vddValue;
         $('info-vdd').textContent = vdd + ' V';
         log(`  ✔ ${tr('log.conn.voltage.label')}: ${vdd} V`, 'ok');
       } else {
@@ -4456,28 +4530,19 @@ log('  ✔ SWD entered', 'ok');
     const disp = $('chip-id-display');
     disp.classList.remove('empty');
     disp.textContent = uidFmt;
-    
+
+    // 存储UID供复制按钮使用
+    disp.dataset.uid = uidFmt;
+
     // 同时update芯片info面板中的 Chip ID 显示
     if ($('info-chipid')) {
       $('info-chipid').textContent = uidFmt;
-      // 显示copy按钮并添加事件监听
+      // 显示copy按钮
       const copyBtn = $('btn-info-chipid-copy');
       if (copyBtn) {
         copyBtn.style.display = 'inline-block';
-        copyBtn.onclick = (e) => {
-          e.stopPropagation();
-          navigator.clipboard.writeText(uidFmt).then(() => {
-            // 视觉反馈：按钮闪光
-            const origText = copyBtn.textContent;
-            copyBtn.textContent = '✓';
-            copyBtn.style.color = 'var(--green)';
-            setTimeout(() => {
-              copyBtn.textContent = origText;
-              copyBtn.style.color = '';
-            }, 800);
-            log('Chip ID copied to clipboard', 'ok');
-          });
-        };
+        // 存储UID到按钮dataset供事件处理器使用
+        copyBtn.dataset.uid = uidFmt;
       }
     }
 
@@ -4508,15 +4573,8 @@ log('  ✔ SWD entered', 'ok');
     }
 
     $('btn-copy').disabled = false;
-    $('btn-copy').onclick = () => {
-      navigator.clipboard.writeText(uidStr).then(() => {
-        // 闪光效果反馈
-        const bytesEl = $('uid-bytes');
-        bytesEl.classList.add('uid-flash');
-        setTimeout(() => bytesEl.classList.remove('uid-flash'), 400);
-        log('UID copied to clipboard', 'ok');
-      });
-    };
+    // 存储UID到按钮dataset
+    $('btn-copy').dataset.uid = uidStr;
     $('chip-hint').textContent = `UID 地址: 0x${uidBase.toString(16).toUpperCase()}`;
 
     const toHex32 = n => (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
