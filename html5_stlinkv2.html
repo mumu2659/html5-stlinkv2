@@ -3499,7 +3499,7 @@ $('btn-program').addEventListener('click', async () => {
   const runStartTs = Date.now();
   programProgressStartTs = runStartTs;
   $('progress-eta').textContent = 'ETA --';
-  updateProgramProgress('ready中', 0, 1);
+  updateProgramProgress('Preparing...', 0, 1);
 
   const verifyEnabled = $('opt-verify').checked;
   let verifyPassed = !verifyEnabled;
@@ -3676,10 +3676,10 @@ $('btn-program').addEventListener('click', async () => {
           
           updateProgramProgressByStage(
             'program',
-            `写入 Segment ${segIdx + 1}/${programSegments.length}`,
+            `Writing Segment ${segIdx + 1}/${programSegments.length}`,
             totalProgrammed,
             totalSize,
-            `地址 0x${blockAddr.toString(16).toUpperCase().padStart(8, '0')} · ${(totalProgrammed / 1024).toFixed(2)} / ${(totalSize / 1024).toFixed(2)} KB`
+            `Address 0x${blockAddr.toString(16).toUpperCase().padStart(8, '0')} · ${(totalProgrammed / 1024).toFixed(2)} / ${(totalSize / 1024).toFixed(2)} KB`
           );
           
         } catch (e) {
