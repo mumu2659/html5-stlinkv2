@@ -790,6 +790,208 @@
   #panel-chipid {
     display: none;
   }
+
+  /* ===== Info & Help Sections ===== */
+  .info-banner {
+    width: 100%;
+    max-width: 720px;
+    margin: 0 auto 16px;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .info-banner.warning {
+    background: rgba(255, 152, 0, 0.08);
+    border: 1px solid rgba(255, 152, 0, 0.25);
+    color: #ffb74d;
+  }
+
+  .info-banner.success {
+    background: rgba(0, 255, 157, 0.08);
+    border: 1px solid rgba(0, 255, 157, 0.25);
+    color: var(--green);
+  }
+
+  .info-banner-icon {
+    font-size: 1.3rem;
+    flex-shrink: 0;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .info-banner-content {
+    flex: 1;
+  }
+
+  .help-toggle {
+    background: rgba(0, 229, 255, 0.08);
+    border: 1px solid rgba(0, 229, 255, 0.2);
+    cursor: pointer;
+    transition: all 0.3s;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin: 0 auto 16px;
+    width: 100%;
+    max-width: 720px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--accent);
+    font-size: 0.9rem;
+    font-weight: 600;
+    font-family: 'Rajdhani', sans-serif;
+  }
+
+  .help-toggle:hover {
+    background: rgba(0, 229, 255, 0.12);
+    box-shadow: 0 0 12px rgba(0, 229, 255, 0.2);
+  }
+
+  .help-toggle-icon {
+    transition: transform 0.3s;
+    font-size: 1.1rem;
+  }
+
+  .help-toggle.open .help-toggle-icon {
+    transform: rotate(180deg);
+  }
+
+  .help-panel {
+    width: 100%;
+    max-width: 720px;
+    margin: 0 auto 16px;
+    padding: 16px;
+    background: rgba(0, 229, 255, 0.05);
+    border: 1px solid rgba(0, 229, 255, 0.15);
+    border-radius: 8px;
+    display: none;
+    animation: slideDown 0.3s ease;
+  }
+
+  .help-panel.show {
+    display: block;
+  }
+
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .help-section {
+    margin-bottom: 16px;
+    font-size: 0.85rem;
+    line-height: 1.7;
+    color: var(--text);
+  }
+
+  .help-section:last-child {
+    margin-bottom: 0;
+  }
+
+  .help-section-title {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .help-section-content {
+    padding-left: 16px;
+    color: var(--dim);
+  }
+
+  .browser-compat {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .browser-item {
+    padding: 8px 10px;
+    border-radius: 5px;
+    font-size: 0.78rem;
+    font-family: 'Share Tech Mono', monospace;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .browser-item.supported {
+    background: rgba(0, 255, 157, 0.08);
+    color: var(--green);
+  }
+
+  .browser-item.unsupported {
+    background: rgba(255, 152, 0, 0.08);
+    color: #ffb74d;
+    text-decoration: line-through;
+  }
+
+  .step-list {
+    list-style: none;
+    padding: 0;
+    margin: 8px 0 0 0;
+  }
+
+  .step-list li {
+    padding: 6px 0;
+    color: var(--dim);
+  }
+
+  .step-list strong {
+    color: var(--accent);
+  }
+
+  .footer {
+    width: 100%;
+    text-align: center;
+    padding: 24px 16px;
+    margin-top: 40px;
+    border-top: 1px solid var(--border);
+    color: var(--dim);
+    font-size: 0.75rem;
+  }
+
+  .footer-links {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  .footer-link {
+    color: var(--accent);
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .footer-link:hover {
+    color: var(--accent2);
+    text-shadow: 0 0 8px rgba(0, 229, 255, 0.3);
+  }
+
+  .footer-divider {
+    color: var(--dim);
+  }
 </style>
 </head>
 <body>
@@ -805,6 +1007,67 @@
   </div>
   <div class="subtitle">Chip ID Reader · WebUSB Interface</div>
 </header>
+
+<!-- System Requirements & Browser Compatibility Banner -->
+<div class="info-banner warning" id="system-info">
+  <div class="info-banner-icon">⚙️</div>
+  <div class="info-banner-content">
+    <strong>System Requirements:</strong> Chrome/Edge 61+ (desktop) with WebUSB support. Not compatible with Firefox or Safari.
+  </div>
+</div>
+
+<!-- Quick Start Help Panel -->
+<div class="help-toggle" onclick="toggleHelpPanel()">
+  <span>❓ Help & Getting Started</span>
+  <span class="help-toggle-icon">▼</span>
+</div>
+
+<div class="help-panel" id="help-panel">
+  <div class="help-section">
+    <div class="help-section-title">📋 What is this Tool?</div>
+    <div class="help-section-content">
+      ST-Link V2 WebUSB Programmer - Read chip IDs, program firmware, and manage STM32 microcontrollers directly from your browser using ST-Link V2 debugger.
+    </div>
+  </div>
+
+  <div class="help-section">
+    <div class="help-section-title">✅ Browser Compatibility</div>
+    <div class="browser-compat">
+      <div class="browser-item supported">✓ Chrome 61+</div>
+      <div class="browser-item supported">✓ Edge 79+</div>
+      <div class="browser-item supported">✓ Opera 48+</div>
+      <div class="browser-item unsupported">✗ Firefox</div>
+      <div class="browser-item unsupported">✗ Safari</div>
+      <div class="browser-item unsupported">✗ Mobile</div>
+    </div>
+  </div>
+
+  <div class="help-section">
+    <div class="help-section-title">📁 Supported Formats</div>
+    <div class="help-section-content">
+      Intel HEX (.hex) • Binary (.bin) | STM32F0 / F1 / F3 / F4 / F7 / L0 / L1 / L4 / G0 / H7
+    </div>
+  </div>
+
+  <div class="help-section">
+    <div class="help-section-title">🚀 Quick Start (4 Steps)</div>
+    <ul class="step-list">
+      <li><strong>Step 1:</strong> Connect ST-Link V2 via USB → Click "Connect Device"</li>
+      <li><strong>Step 2:</strong> Click "Read Chip ID" to identify target MCU</li>
+      <li><strong>Step 3:</strong> Upload firmware .hex or .bin file</li>
+      <li><strong>Step 4:</strong> Click "Program Device" to flash firmware</li>
+    </ul>
+  </div>
+
+  <div class="help-section">
+    <div class="help-section-title">⚠️ Troubleshooting</div>
+    <div class="help-section-content">
+      <strong>Connection fails:</strong> Close CubeIDE/CubeProgrammer, unplug USB, wait 2 sec, replug, retry.<br><br>
+      <strong>Cannot read chip:</strong> Check SWDIO/SWCLK wiring voltage, reduce frequency to 125kHz, verify target power (3.3V/1.8V).<br><br>
+      <strong>Browser says WebUSB not available:</strong> Use Chrome/Edge on desktop, enable USB debugging on system.
+    </div>
+  </div>
+</div>
 
 <!-- Device Inaccessible / Conflict Error Modal -->
 <div class="modal-overlay" id="modal-conflict">
@@ -888,7 +1151,10 @@
 
 <div class="status-bar">
   <div class="status-dot" id="status-dot"></div>
-  <span id="status-text">ST-Link device not connected</span>
+  <div style="flex: 1;">
+    <div id="status-text" style="color: var(--dim); margin-bottom: 4px;">ST-Link device not connected</div>
+    <div id="status-info" style="font-size: 0.7rem; color: var(--dim);">Ready to connect</div>
+  </div>
   <button class="btn btn-secondary" id="btn-connect" style="margin-left:auto; flex-shrink:0">Connect Device</button>
   <button class="btn btn-danger" id="btn-disconnect" style="display:none; flex-shrink:0">Disconnect</button>
 </div>
@@ -2533,12 +2799,14 @@ const log = (msg, cls = '') => {
   $('log').scrollTop = $('log').scrollHeight;
 };
 
-const setStatus = (text, type = '') => {
+const setStatus = (text, type = '', info = '') => {
   const dot = $('status-dot');
   const st  = $('status-text');
+  const si  = $('status-info');
   dot.className  = 'status-dot' + (type ? ' '+type : '');
   st.className   = type;
   st.textContent = text;
+  if (si) si.textContent = info;
 };
 
 // 工作流控制：updatestep指示器和帮助文本
@@ -4256,7 +4524,11 @@ log('  ✔ SWD entered', 'ok');
     log(`  UID[1] = 0x${toHex32(w1)}`, 'ok');
     log(`  UID[2] = 0x${toHex32(w2)}`, 'ok');
     log(`✔ Full UID: ${uidFmt}`, 'ok');
-    setStatus(`Connected · ${$('info-model').textContent}`, 'connected');
+    const chipModel = $('info-model').textContent;
+    const flashVal = $('info-flash').textContent;
+    const ramVal = $('info-ram').textContent;
+    const infoStr = `${flashVal} | ${ramVal}`;
+    setStatus(`Connected · ${chipModel}`, 'connected', infoStr);
     
     updateWorkflow(3, '💾 Select firmware file and click "Start Download" to program');
 
@@ -4281,6 +4553,32 @@ $('btn-clear').addEventListener('click', () => {
 });
 
 $('btn-clear-log').addEventListener('click', () => { $('log').innerHTML = ''; });
+
+// Toggle Help Panel
+function toggleHelpPanel() {
+  const panel = document.getElementById('help-panel');
+  const toggle = document.querySelector('.help-toggle');
+  panel.classList.toggle('show');
+  toggle.classList.toggle('open');
+}
 </script>
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="footer-links">
+    <span class="footer-link" onclick="alert('Version 1.0.0\n\nST-Link V2 WebUSB Programmer\nBuilt with vanilla JavaScript + HTML5\n\nFor issues and feedback, visit GitHub.')">ℹ️ About</span>
+    <span class="footer-divider">•</span>
+    <span class="footer-link" onclick="toggleHelpPanel()">❓ Help</span>
+    <span class="footer-divider">•</span>
+    <span class="footer-link" onclick="alert('Browser Console (F12):\nAll operations are logged for debugging.\n\nCheck: Chip ID reads, Flash operations, connection status, timing info.')">🐛 Debug Console</span>
+    <span class="footer-divider">•</span>
+    <span class="footer-link" onclick="location.href='https://github.com/stm32-tools'">💻 GitHub</span>
+  </div>
+  <div style="color: var(--dim); font-size: 0.7rem;">
+    © 2024 ST-Link WebUSB Tools | Version 1.0.0<br>
+    STM32 is a trademark of STMicroelectronics
+  </div>
+</footer>
+
 </body>
 </html>
